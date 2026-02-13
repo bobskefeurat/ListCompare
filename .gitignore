@@ -15,6 +15,7 @@ ENV/
 .ruff_cache/
 .coverage
 htmlcov/
+tests/tmp_test/
 
 # IDE and OS files
 .vscode/
