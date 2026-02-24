@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -14,25 +15,185 @@ from ..core.comparison_use_cases import (
     unique_sorted_skus_from_product_map,
 )
 from ..core.product_diff import ProductMap, normalize_sku
-from ..core.product_model import HICORE_COLUMNS, Product, prepare_data
+from ..core.product_model import HICORE_COLUMNS, Product, build_product_map, prepare_data
 from ..core.supplier_products import build_supplier_map
 
 CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin1")
 SUPPLIER_INDEX_PATH = (Path(__file__).resolve().parents[2] / "supplier_index.txt").resolve()
 BRAND_INDEX_PATH = (Path(__file__).resolve().parents[2] / "brand_index.txt").resolve()
+UI_SETTINGS_PATH = (Path(__file__).resolve().parents[2] / "ui_settings.json").resolve()
+
+
+MENU_COMPARE = "J\u00e4mf\u00f6r Hicore/Magento"
+MENU_SUPPLIER = "Hantera leverant\u00f6r"
+MENU_SETTINGS = "Inst\u00e4llningar"
+
+FILE_STATE_KEYS = {
+    "hicore": "stored_hicore_file",
+    "magento": "stored_magento_file",
+    "supplier": "stored_supplier_file",
+}
+
+UPLOADER_KEYS_BY_KIND = {
+    "hicore": ("compare_hicore_uploader", "supplier_hicore_uploader"),
+    "magento": ("compare_magento_uploader",),
+    "supplier": ("supplier_file_uploader",),
+}
 
 
 @dataclass(frozen=True)
-class UiResult:
+class CompareUiResult:
     only_in_magento_df: pd.DataFrame
     stock_mismatch_df: pd.DataFrame
-    internal_only_df: Optional[pd.DataFrame]
+    only_in_magento_csv_bytes: bytes
     stock_mismatch_csv_bytes: bytes
-    internal_only_csv_bytes: Optional[bytes]
     only_in_magento_count: int
     stock_mismatch_count: int
-    internal_only_count: Optional[int]
     warning_message: Optional[str]
+
+
+@dataclass(frozen=True)
+class SupplierUiResult:
+    internal_only_df: pd.DataFrame
+    internal_only_csv_bytes: bytes
+    internal_only_count: int
+    warning_message: Optional[str]
+
+
+def _load_ui_settings(path: Path) -> tuple[dict[str, list[str]], Optional[str]]:
+    default_settings: dict[str, list[str]] = {"excluded_brands": []}
+    if not path.exists():
+        return default_settings, None
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8-sig"))
+        if not isinstance(raw, dict):
+            raise ValueError("ui_settings.json måste innehålla ett JSON-objekt.")
+
+        raw_excluded = raw.get("excluded_brands", [])
+        if not isinstance(raw_excluded, list):
+            raise ValueError('Fältet "excluded_brands" måste vara en lista.')
+
+        excluded_brands = _normalize_supplier_names([str(name) for name in raw_excluded])
+        return {"excluded_brands": excluded_brands}, None
+    except Exception as exc:
+        return default_settings, str(exc)
+
+
+def _save_ui_settings(path: Path, *, excluded_brands: list[str]) -> Optional[str]:
+    payload = {
+        "excluded_brands": _normalize_supplier_names([str(name) for name in excluded_brands]),
+    }
+    try:
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return None
+    except Exception as exc:
+        return str(exc)
+
+
+def _init_session_state() -> None:
+    ui_settings, ui_settings_error = _load_ui_settings(UI_SETTINGS_PATH)
+    defaults = {
+        FILE_STATE_KEYS["hicore"]: None,
+        FILE_STATE_KEYS["magento"]: None,
+        FILE_STATE_KEYS["supplier"]: None,
+        "compare_ui_result": None,
+        "compare_ui_error": None,
+        "supplier_ui_result": None,
+        "supplier_ui_error": None,
+        "excluded_brands": list(ui_settings.get("excluded_brands", [])),
+        "supplier_internal_name": None,
+        "_last_supplier_internal_name": None,
+        "ui_settings_load_error": ui_settings_error,
+        "ui_settings_save_error": None,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def _clear_compare_state() -> None:
+    st.session_state["compare_ui_result"] = None
+    st.session_state["compare_ui_error"] = None
+
+
+def _clear_supplier_state() -> None:
+    st.session_state["supplier_ui_result"] = None
+    st.session_state["supplier_ui_error"] = None
+
+
+def _clear_all_run_state() -> None:
+    _clear_compare_state()
+    _clear_supplier_state()
+
+
+def _persist_excluded_brands_setting() -> None:
+    save_error = _save_ui_settings(
+        UI_SETTINGS_PATH,
+        excluded_brands=[str(name) for name in st.session_state.get("excluded_brands", [])],
+    )
+    st.session_state["ui_settings_save_error"] = save_error
+    if save_error is None:
+        st.session_state["ui_settings_load_error"] = None
+
+
+def _get_stored_file(kind: str) -> Optional[dict[str, object]]:
+    return st.session_state.get(FILE_STATE_KEYS[kind])
+
+
+def _store_uploaded_file(kind: str, uploaded_file) -> None:
+    st.session_state[FILE_STATE_KEYS[kind]] = {
+        "name": uploaded_file.name,
+        "bytes": uploaded_file.getvalue(),
+    }
+    _clear_all_run_state()
+
+
+def _clear_stored_file(kind: str) -> None:
+    st.session_state[FILE_STATE_KEYS[kind]] = None
+    for widget_key in UPLOADER_KEYS_BY_KIND.get(kind, ()):
+        st.session_state.pop(widget_key, None)
+    _clear_all_run_state()
+
+
+def _rerun() -> None:
+    rerun_fn = getattr(st, "rerun", None)
+    if callable(rerun_fn):
+        rerun_fn()
+        return
+    st.experimental_rerun()
+
+
+def _render_file_input(
+    *,
+    kind: str,
+    label: str,
+    file_types: list[str],
+    uploader_key: str,
+) -> Optional[dict[str, object]]:
+    stored = _get_stored_file(kind)
+    if stored is not None:
+        filename = str(stored.get("name", ""))
+        info_col, button_col = st.columns([5, 1])
+        info_col.success(f"{label}: uppladdad ({filename})")
+        if button_col.button("Byt fil", key=f"replace_{kind}_{uploader_key}"):
+            _clear_stored_file(kind)
+            _rerun()
+        return stored
+
+    uploaded = st.file_uploader(
+        label,
+        type=file_types,
+        accept_multiple_files=False,
+        key=uploader_key,
+    )
+    if uploaded is not None:
+        _store_uploaded_file(kind, uploaded)
+        _rerun()
+    return None
 
 
 def _uploaded_csv_to_df(
@@ -99,7 +260,7 @@ def _brand_names_from_hicore_df(df_hicore: pd.DataFrame) -> list[str]:
 
 def _load_suppliers_from_index(path: Path) -> tuple[list[str], Optional[str]]:
     if not path.exists():
-        return [], f"Saknar leverantörsindex: {path.name}"
+        return [], f"Saknar leverant\u00f6rsindex: {path.name}"
 
     try:
         content = path.read_text(encoding="utf-8-sig")
@@ -119,7 +280,7 @@ def _save_suppliers_to_index(path: Path, suppliers: list[str]) -> None:
 
 def _load_brands_from_index(path: Path) -> tuple[list[str], Optional[str]]:
     if not path.exists():
-        return [], f"Saknar varumarkesindex: {path.name}"
+        return [], f"Saknar varum\u00e4rkesindex: {path.name}"
 
     try:
         content = path.read_text(encoding="utf-8-sig")
@@ -184,7 +345,7 @@ def _normalized_skus_for_excluded_brands(
 
     brand_col = HICORE_COLUMNS.get("brand")
     if brand_col is None or brand_col not in df_hicore.columns:
-        return set(), 'HiCore-filen saknar kolumnen "Varumärke". Varumärkesexkludering ignorerades.'
+        return set(), 'HiCore-filen saknar kolumnen "Varum\u00e4rke". Varum\u00e4rkesexkludering ignorerades.'
 
     sku_col = HICORE_COLUMNS["sku"]
     if sku_col not in df_hicore.columns:
@@ -268,18 +429,16 @@ def _mismatch_map_to_df(mismatch_map: dict[str, dict[str, list[Product]]]) -> pd
 
 
 def _sku_csv_bytes(skus: list[str]) -> bytes:
-    df = pd.DataFrame({"Art.märkning": skus})
+    df = pd.DataFrame({"Art.m\u00e4rkning": skus})
     return df.to_csv(sep=";", index=False).encode("utf-8-sig")
 
 
-def _compute_ui_result(
+def _compute_compare_result(
     hicore_bytes: bytes,
     magento_bytes: bytes,
-    supplier_name: str,
-    supplier_file_name: Optional[str],
-    supplier_bytes: Optional[bytes],
+    *,
     excluded_brands: Optional[list[str]] = None,
-) -> UiResult:
+) -> CompareUiResult:
     df_hicore = _uploaded_csv_to_df(hicore_bytes, sep=";")
     df_magento = _uploaded_csv_to_df(magento_bytes, sep=";")
     hicore_map, magento_map = prepare_data(df_hicore, df_magento)
@@ -288,122 +447,319 @@ def _compute_ui_result(
         excluded_brands or [],
     )
 
-    supplier_map: Optional[ProductMap] = None
-    if supplier_file_name and supplier_bytes:
-        df_supplier = _read_supplier_upload(supplier_file_name, supplier_bytes)
-        supplier_map = build_supplier_map(df_supplier)
-
     results = build_comparison_results(
         hicore_map,
         magento_map,
+        excluded_normalized_skus=excluded_normalized_skus,
+    )
+
+    only_in_magento_skus = unique_sorted_skus_from_product_map(results.only_in_magento)
+    stock_skus = unique_sorted_skus_from_mismatch_side(results.stock_mismatches, "magento")
+    return CompareUiResult(
+        only_in_magento_df=_product_map_to_df(results.only_in_magento),
+        stock_mismatch_df=_mismatch_map_to_df(results.stock_mismatches),
+        only_in_magento_csv_bytes=_sku_csv_bytes(only_in_magento_skus),
+        stock_mismatch_csv_bytes=_sku_csv_bytes(stock_skus),
+        only_in_magento_count=len(results.only_in_magento),
+        stock_mismatch_count=len(results.stock_mismatches),
+        warning_message=warning_message,
+    )
+
+
+def _compute_supplier_result(
+    hicore_bytes: bytes,
+    *,
+    supplier_name: str,
+    supplier_file_name: str,
+    supplier_bytes: bytes,
+    excluded_brands: Optional[list[str]] = None,
+) -> SupplierUiResult:
+    df_hicore = _uploaded_csv_to_df(hicore_bytes, sep=";")
+    hicore_map = build_product_map(
+        df_hicore,
+        source="hicore",
+        columns=HICORE_COLUMNS,
+    )
+    excluded_normalized_skus, warning_message = _normalized_skus_for_excluded_brands(
+        df_hicore,
+        excluded_brands or [],
+    )
+    df_supplier = _read_supplier_upload(supplier_file_name, supplier_bytes)
+    supplier_map = build_supplier_map(df_supplier)
+    results = build_comparison_results(
+        hicore_map,
+        {},
         supplier_map=supplier_map,
         supplier_internal_name=supplier_name,
         excluded_normalized_skus=excluded_normalized_skus,
     )
 
-    only_in_magento_df = _product_map_to_df(results.only_in_magento)
-    stock_mismatch_df = _mismatch_map_to_df(results.stock_mismatches)
-    internal_only_df = (
-        _product_map_to_df(results.internal_only_candidates)
-        if results.internal_only_candidates is not None
-        else None
-    )
-
-    stock_skus = unique_sorted_skus_from_mismatch_side(results.stock_mismatches, "magento")
-    stock_csv_bytes = _sku_csv_bytes(stock_skus)
-
-    internal_only_csv_bytes: Optional[bytes] = None
-    if results.internal_only_candidates is not None:
-        internal_skus = unique_sorted_skus_from_product_map(results.internal_only_candidates)
-        internal_only_csv_bytes = _sku_csv_bytes(internal_skus)
-
-    return UiResult(
-        only_in_magento_df=only_in_magento_df,
-        stock_mismatch_df=stock_mismatch_df,
-        internal_only_df=internal_only_df,
-        stock_mismatch_csv_bytes=stock_csv_bytes,
-        internal_only_csv_bytes=internal_only_csv_bytes,
-        only_in_magento_count=len(results.only_in_magento),
-        stock_mismatch_count=len(results.stock_mismatches),
-        internal_only_count=(
-            len(results.internal_only_candidates)
-            if results.internal_only_candidates is not None
-            else None
-        ),
+    internal_only_map = results.internal_only_candidates or {}
+    internal_only_skus = unique_sorted_skus_from_product_map(internal_only_map)
+    return SupplierUiResult(
+        internal_only_df=_product_map_to_df(internal_only_map),
+        internal_only_csv_bytes=_sku_csv_bytes(internal_only_skus),
+        internal_only_count=len(internal_only_map),
         warning_message=warning_message,
     )
 
 
-def _render_results(result: UiResult) -> None:
+def _render_compare_results(result: CompareUiResult) -> None:
     if result.warning_message:
         st.warning(result.warning_message)
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     col1.metric("Only in Magento", result.only_in_magento_count)
     col2.metric("Stock mismatches", result.stock_mismatch_count)
-    col3.metric(
-        "Internal only",
-        result.internal_only_count if result.internal_only_count is not None else "N/A",
-    )
 
     download_col1, download_col2 = st.columns(2)
     download_col1.download_button(
+        label="Ladda ner only_in_magento_skus.csv",
+        data=result.only_in_magento_csv_bytes,
+        file_name="only_in_magento_skus.csv",
+        mime="text/csv",
+        key="download_only_in_magento_csv",
+    )
+    download_col2.download_button(
         label="Ladda ner stock_mismatch_skus.csv",
         data=result.stock_mismatch_csv_bytes,
         file_name="stock_mismatch_skus.csv",
         mime="text/csv",
+        key="download_stock_mismatch_csv",
     )
-    if result.internal_only_csv_bytes is not None:
-        download_col2.download_button(
-            label="Ladda ner internal_only_skus.csv",
-            data=result.internal_only_csv_bytes,
-            file_name="internal_only_skus.csv",
-            mime="text/csv",
-        )
 
-    tab1, tab2, tab3 = st.tabs(
-        ["Only in Magento", "Stock mismatches", "Internal only (supplier)"]
-    )
+    tab1, tab2 = st.tabs(["Only in Magento", "Stock mismatches"])
     with tab1:
         st.dataframe(result.only_in_magento_df, use_container_width=True)
     with tab2:
         st.dataframe(result.stock_mismatch_df, use_container_width=True)
-    with tab3:
-        if result.internal_only_df is None:
-            st.info("Ingen supplier-fil uppladdad, så den här listan kan inte beräknas.")
-        else:
-            st.dataframe(result.internal_only_df, use_container_width=True)
+
+
+def _render_supplier_results(result: SupplierUiResult) -> None:
+    if result.warning_message:
+        st.warning(result.warning_message)
+
+    st.metric("Internal only (supplier)", result.internal_only_count)
+    st.download_button(
+        label="Ladda ner internal_only_skus.csv",
+        data=result.internal_only_csv_bytes,
+        file_name="internal_only_skus.csv",
+        mime="text/csv",
+        key="download_internal_only_csv",
+    )
+    st.dataframe(result.internal_only_df, use_container_width=True)
+
+
+def _render_compare_page(*, excluded_brands: list[str]) -> None:
+    st.header(MENU_COMPARE)
+    st.caption("Ladda upp filer.")
+
+    hicore_file = _render_file_input(
+        kind="hicore",
+        label="HiCore-export (.csv)",
+        file_types=["csv"],
+        uploader_key="compare_hicore_uploader",
+    )
+    magento_file = _render_file_input(
+        kind="magento",
+        label="Magento-export (.csv)",
+        file_types=["csv"],
+        uploader_key="compare_magento_uploader",
+    )
+
+    if excluded_brands:
+        shown_brands = excluded_brands[:8]
+        extra_count = len(excluded_brands) - len(shown_brands)
+        suffix = f" (+{extra_count} till)" if extra_count > 0 else ""
+        st.info(
+            f"Exkluderade varum\u00e4rken: {', '.join(shown_brands)}{suffix}."
+        )
+    else:
+        st.caption("Inga varum\u00e4rken exkluderas. \u00c4ndra i Inst\u00e4llningar vid behov.")
+
+    can_run = hicore_file is not None and magento_file is not None
+    if st.button(
+        "K\u00f6r J\u00e4mf\u00f6relse",
+        type="primary",
+        disabled=not can_run,
+        key="run_compare_button",
+    ):
+        try:
+            result = _compute_compare_result(
+                hicore_bytes=hicore_file["bytes"],  # type: ignore[index]
+                magento_bytes=magento_file["bytes"],  # type: ignore[index]
+                excluded_brands=[str(name) for name in excluded_brands],
+            )
+            st.session_state["compare_ui_result"] = result
+            st.session_state["compare_ui_error"] = None
+        except Exception as exc:
+            st.session_state["compare_ui_result"] = None
+            st.session_state["compare_ui_error"] = str(exc)
+
+    if st.session_state["compare_ui_error"]:
+        st.error(st.session_state["compare_ui_error"])
+    if st.session_state["compare_ui_result"] is not None:
+        _render_compare_results(st.session_state["compare_ui_result"])
+
+
+def _render_supplier_page(
+    *,
+    supplier_options: list[str],
+    supplier_index_error: Optional[str],
+    new_supplier_names: list[str],
+    excluded_brands: list[str],
+) -> None:
+    st.header(MENU_SUPPLIER)
+
+    hicore_file = _render_file_input(
+        kind="hicore",
+        label="HiCore-export (.csv)",
+        file_types=["csv"],
+        uploader_key="supplier_hicore_uploader",
+    )
+    supplier_file = _render_file_input(
+        kind="supplier",
+        label="Leverant\u00f6rsfil (.csv/.xlsx/.xls/.xlsm)",
+        file_types=["csv", "xlsx", "xls", "xlsm"],
+        uploader_key="supplier_file_uploader",
+    )
+
+    previous_supplier_name = st.session_state.get("_last_supplier_internal_name")
+    supplier_internal_name = st.selectbox(
+        "V\u00e4lj leverant\u00f6r",
+        options=supplier_options,
+        index=None,
+        placeholder="V\u00e4lj leverant\u00f6r...",
+        key="supplier_internal_name",
+    )
+    if previous_supplier_name != supplier_internal_name:
+        st.session_state["_last_supplier_internal_name"] = supplier_internal_name
+        _clear_supplier_state()
+
+    can_run = (
+        hicore_file is not None
+        and supplier_file is not None
+        and supplier_internal_name is not None
+        and str(supplier_internal_name).strip() != ""
+    )
+    if st.button(
+        "K\u00f6r J\u00e4mf\u00f6relse",
+        type="primary",
+        disabled=not can_run,
+        key="run_supplier_button",
+    ):
+        supplier_name = str(supplier_internal_name).strip()
+        try:
+            result = _compute_supplier_result(
+                hicore_bytes=hicore_file["bytes"],  # type: ignore[index]
+                supplier_name=supplier_name,
+                supplier_file_name=str(supplier_file["name"]),  # type: ignore[index]
+                supplier_bytes=supplier_file["bytes"],  # type: ignore[index]
+                excluded_brands=[str(name) for name in excluded_brands],
+            )
+            st.session_state["supplier_ui_result"] = result
+            st.session_state["supplier_ui_error"] = None
+        except Exception as exc:
+            st.session_state["supplier_ui_result"] = None
+            st.session_state["supplier_ui_error"] = str(exc)
+
+    st.caption(f"Antal leverant\u00f6rer: {len(supplier_options)}")
+    if new_supplier_names:
+        st.success(
+            f"Uppdaterade {SUPPLIER_INDEX_PATH.name} med {len(new_supplier_names)} ny(a) leverant\u00f6r(er) fr\u00e5n HiCore."
+        )
+    if supplier_index_error:
+        st.warning(
+            f"Kunde inte l\u00e4sa {SUPPLIER_INDEX_PATH.name} vid uppstart: {supplier_index_error}"
+        )
+
+    if st.session_state["supplier_ui_error"]:
+        st.error(st.session_state["supplier_ui_error"])
+    if st.session_state["supplier_ui_result"] is not None:
+        _render_supplier_results(st.session_state["supplier_ui_result"])
+
+
+def _render_settings_page(
+    *,
+    brand_options: list[str],
+    brand_index_error: Optional[str],
+    new_brand_names: list[str],
+    hicore_missing_brand_column: bool,
+) -> None:
+    st.header(MENU_SETTINGS)
+
+    current_hicore = _get_stored_file("hicore")
+    existing_excluded = [name for name in st.session_state["excluded_brands"] if name in brand_options]
+    if existing_excluded != st.session_state["excluded_brands"]:
+        st.session_state["excluded_brands"] = existing_excluded
+        _persist_excluded_brands_setting()
+        _clear_all_run_state()
+
+    if "excluded_brands_widget" not in st.session_state:
+        st.session_state["excluded_brands_widget"] = list(st.session_state["excluded_brands"])
+    else:
+        widget_selection = [
+            name for name in st.session_state.get("excluded_brands_widget", []) if name in brand_options
+        ]
+        if widget_selection != st.session_state.get("excluded_brands_widget", []):
+            st.session_state["excluded_brands_widget"] = widget_selection
+
+    selected_excluded = st.multiselect(
+        "Varum\u00e4rken som ska exkluderas i k\u00f6rningar",
+        options=brand_options,
+        placeholder="V\u00e4lj ett eller flera varum\u00e4rken...",
+        disabled=bool(current_hicore is not None and hicore_missing_brand_column),
+        key="excluded_brands_widget",
+    )
+    normalized_selected = [name for name in selected_excluded if name in brand_options]
+    if normalized_selected != st.session_state["excluded_brands"]:
+        st.session_state["excluded_brands"] = normalized_selected
+        _persist_excluded_brands_setting()
+        _clear_all_run_state()
+
+    st.caption(f"Antal varum\u00e4rken: {len(brand_options)}")
+    if new_brand_names:
+        st.success(
+            f"Uppdaterade {BRAND_INDEX_PATH.name} med {len(new_brand_names)} ny(a) varum\u00e4rke(n) fr\u00e5n HiCore."
+        )
+    if brand_index_error:
+        st.warning(f"Kunde inte l\u00e4sa {BRAND_INDEX_PATH.name} vid uppstart: {brand_index_error}")
+    if st.session_state.get("ui_settings_load_error"):
+        st.warning(
+            f"Kunde inte l\u00e4sa {UI_SETTINGS_PATH.name} vid uppstart: {st.session_state['ui_settings_load_error']}"
+        )
+    if st.session_state.get("ui_settings_save_error"):
+        st.warning(
+            f"Kunde inte spara {UI_SETTINGS_PATH.name}: {st.session_state['ui_settings_save_error']}"
+        )
+    if current_hicore is not None and hicore_missing_brand_column:
+        st.warning(
+            'HiCore-filen saknar kolumnen "Varum\u00e4rke". Varum\u00e4rkesexkludering \u00e4r inte tillg\u00e4nglig f\u00f6r den filen.'
+        )
 
 
 def main() -> None:
     st.set_page_config(page_title="ListCompare", layout="wide")
+    _init_session_state()
+
     st.title("ListCompare")
+    st.sidebar.title("Meny")
+    selected_menu = st.sidebar.radio(
+        "V\u00e4lj vy",
+        options=[MENU_COMPARE, MENU_SUPPLIER, MENU_SETTINGS],
+    )
 
     indexed_suppliers, supplier_index_error = _load_suppliers_from_index(SUPPLIER_INDEX_PATH)
     indexed_brands, brand_index_error = _load_brands_from_index(BRAND_INDEX_PATH)
-
-    hicore_file = st.file_uploader(
-        "HiCore-export (.csv)",
-        type=["csv"],
-        accept_multiple_files=False,
-    )
-    magento_file = st.file_uploader(
-        "Magento-export (.csv)",
-        type=["csv"],
-        accept_multiple_files=False,
-    )
-    supplier_file = st.file_uploader(
-        "Supplier-fil (.csv/.xlsx/.xls/.xlsm) - valfri",
-        type=["csv", "xlsx", "xls", "xlsm"],
-        accept_multiple_files=False,
-    )
 
     supplier_options = indexed_suppliers
     brand_options = indexed_brands
     new_supplier_names: list[str] = []
     new_brand_names: list[str] = []
     hicore_missing_brand_column = False
-    if hicore_file is not None:
+
+    stored_hicore_file = _get_stored_file("hicore")
+    if stored_hicore_file is not None:
         try:
             (
                 uploaded_suppliers,
@@ -411,8 +767,8 @@ def main() -> None:
                 _has_supplier_column,
                 has_brand_column,
             ) = _load_names_from_uploaded_hicore(
-                hicore_file.name,
-                hicore_file.getvalue(),
+                str(stored_hicore_file["name"]),
+                stored_hicore_file["bytes"],  # type: ignore[index]
             )
             supplier_options, new_supplier_names = _merge_supplier_lists(
                 supplier_options,
@@ -430,81 +786,27 @@ def main() -> None:
 
             hicore_missing_brand_column = not has_brand_column
         except Exception as exc:
-            st.warning(f"Kunde inte läsa leverantörs-/varumärkeslista från uppladdad HiCore-fil: {exc}")
+            st.warning(
+                f"Kunde inte l\u00e4sa leverant\u00f6rs-/varum\u00e4rkeslista fr\u00e5n uppladdad HiCore-fil: {exc}"
+            )
 
-    scanned_supplier_count = len(supplier_options)
-    supplier_internal_name = st.selectbox(
-        "Leverantör",
-        options=supplier_options,
-        index=None,
-        accept_new_options=True,
-        placeholder="Välj leverantör...",
-    )
-    excluded_brands = st.multiselect(
-        "Exkludera varumärken",
-        options=brand_options,
-        default=[],
-        placeholder="Välj ett eller flera varumärken...",
-        disabled=bool(hicore_file is not None and hicore_missing_brand_column),
-    )
-
-    st.caption(
-        f"Antal leverantörer: {scanned_supplier_count}."
-    )
-    if new_supplier_names:
-        st.success(
-            f"Uppdaterade {SUPPLIER_INDEX_PATH.name} med {len(new_supplier_names)} ny(a) leverantör(er)."
+    excluded_brands = [str(name) for name in st.session_state.get("excluded_brands", [])]
+    if selected_menu == MENU_COMPARE:
+        _render_compare_page(excluded_brands=excluded_brands)
+    elif selected_menu == MENU_SUPPLIER:
+        _render_supplier_page(
+            supplier_options=supplier_options,
+            supplier_index_error=supplier_index_error,
+            new_supplier_names=new_supplier_names,
+            excluded_brands=excluded_brands,
         )
-    if supplier_index_error:
-        st.warning(
-            f"Kunde inte läsa {SUPPLIER_INDEX_PATH.name} vid uppstart: {supplier_index_error}"
+    else:
+        _render_settings_page(
+            brand_options=brand_options,
+            brand_index_error=brand_index_error,
+            new_brand_names=new_brand_names,
+            hicore_missing_brand_column=hicore_missing_brand_column,
         )
-    if hicore_file is not None and hicore_missing_brand_column:
-        st.warning('HiCore-filen saknar kolumnen "Varumärke". Varumärkesexkludering är inte tillgänglig för denna fil.')
-
-    st.caption(f"Antal varumärken: {len(brand_options)}.")
-    if new_brand_names:
-        st.success(
-            f"Uppdaterade {BRAND_INDEX_PATH.name} med {len(new_brand_names)} ny(a) varumärke(n)."
-        )
-    if brand_index_error:
-        st.warning(
-            f"Kunde inte läsa {BRAND_INDEX_PATH.name} vid uppstart: {brand_index_error}"
-        )
-
-    if "ui_result" not in st.session_state:
-        st.session_state["ui_result"] = None
-    if "ui_error" not in st.session_state:
-        st.session_state["ui_error"] = None
-
-    if st.button("Kör jämförelse", type="primary"):
-        if hicore_file is None or magento_file is None:
-            st.session_state["ui_error"] = "Ladda upp både HiCore- och Magento-fil."
-            st.session_state["ui_result"] = None
-        elif supplier_internal_name is None or str(supplier_internal_name).strip() == "":
-            st.session_state["ui_error"] = "Välj eller skriv ett leverantörsnamn."
-            st.session_state["ui_result"] = None
-        else:
-            try:
-                result = _compute_ui_result(
-                    hicore_bytes=hicore_file.getvalue(),
-                    magento_bytes=magento_file.getvalue(),
-                    supplier_name=str(supplier_internal_name).strip(),
-                    supplier_file_name=supplier_file.name if supplier_file else None,
-                    supplier_bytes=supplier_file.getvalue() if supplier_file else None,
-                    excluded_brands=[str(name) for name in excluded_brands],
-                )
-                st.session_state["ui_result"] = result
-                st.session_state["ui_error"] = None
-            except Exception as exc:
-                st.session_state["ui_result"] = None
-                st.session_state["ui_error"] = str(exc)
-
-    if st.session_state["ui_error"]:
-        st.error(st.session_state["ui_error"])
-
-    if st.session_state["ui_result"] is not None:
-        _render_results(st.session_state["ui_result"])
 
 
 if __name__ == "__main__":

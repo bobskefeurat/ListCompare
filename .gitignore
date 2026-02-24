@@ -23,3 +23,6 @@ tests/tmp_test/
 *.swp
 Thumbs.db
 .DS_Store
+
+# Local UI settings
+ui_settings.json

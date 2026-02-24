@@ -1,16 +1,16 @@
 ﻿# ListCompare
 
-Projektet ar uppdelat i ett tydligt paket:
+The project is organized into a clear package structure:
 
-- `listcompare/core`: domanlogik (produkter, diff, use cases, leverantorslogik)
+- `listcompare/core`: domain logic (products, diff, use cases, supplier logic)
 - `listcompare/interfaces`: Streamlit UI
 
-## Korning
+## Running
 
 - UI: `python -m streamlit run app.py`
 
-Root-filen `app.py` ar en entrypoint som vidarekopplar till `listcompare/interfaces/ui_app.py`.
+The root file `app.py` is an entrypoint that forwards to `listcompare/interfaces/ui_app.py`.
 
-## Tester
+## Tests
 
-- Kor alla tester: `python -m unittest discover -s tests -p "test_*.py"`
+- Run all tests: `python -m unittest discover -s tests -p "test_*.py"`
