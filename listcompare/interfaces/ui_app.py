@@ -13,12 +13,13 @@ from ..core.comparison_use_cases import (
     unique_sorted_skus_from_mismatch_side,
     unique_sorted_skus_from_product_map,
 )
-from ..core.product_diff import ProductMap
+from ..core.product_diff import ProductMap, normalize_sku
 from ..core.product_model import HICORE_COLUMNS, Product, prepare_data
 from ..core.supplier_products import build_supplier_map
 
 CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin1")
 SUPPLIER_INDEX_PATH = (Path(__file__).resolve().parents[2] / "supplier_index.txt").resolve()
+BRAND_INDEX_PATH = (Path(__file__).resolve().parents[2] / "brand_index.txt").resolve()
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class UiResult:
     only_in_magento_count: int
     stock_mismatch_count: int
     internal_only_count: Optional[int]
+    warning_message: Optional[str]
 
 
 def _uploaded_csv_to_df(
@@ -83,6 +85,18 @@ def _supplier_names_from_hicore_df(df_hicore: pd.DataFrame) -> list[str]:
     return _normalize_supplier_names(raw_names)
 
 
+def _brand_names_from_hicore_df(df_hicore: pd.DataFrame) -> list[str]:
+    brand_col = HICORE_COLUMNS.get("brand")
+    if brand_col is None or brand_col not in df_hicore.columns:
+        return []
+    raw_names: list[str] = [
+        str(value)
+        for value in df_hicore[brand_col].tolist()
+        if not pd.isna(value)
+    ]
+    return _normalize_supplier_names(raw_names)
+
+
 def _load_suppliers_from_index(path: Path) -> tuple[list[str], Optional[str]]:
     if not path.exists():
         return [], f"Saknar leverantörsindex: {path.name}"
@@ -97,6 +111,26 @@ def _load_suppliers_from_index(path: Path) -> tuple[list[str], Optional[str]]:
 
 def _save_suppliers_to_index(path: Path, suppliers: list[str]) -> None:
     normalized = _normalize_supplier_names(suppliers)
+    body = "\n".join(normalized)
+    if body != "":
+        body += "\n"
+    path.write_text(body, encoding="utf-8-sig")
+
+
+def _load_brands_from_index(path: Path) -> tuple[list[str], Optional[str]]:
+    if not path.exists():
+        return [], f"Saknar varumarkesindex: {path.name}"
+
+    try:
+        content = path.read_text(encoding="utf-8-sig")
+        brands = _normalize_supplier_names(content.splitlines())
+        return brands, None
+    except Exception as exc:
+        return [], str(exc)
+
+
+def _save_brands_to_index(path: Path, brands: list[str]) -> None:
+    normalized = _normalize_supplier_names(brands)
     body = "\n".join(normalized)
     if body != "":
         body += "\n"
@@ -119,11 +153,65 @@ def _merge_supplier_lists(existing: list[str], discovered: list[str]) -> tuple[l
     return merged, new_names
 
 
+def _merge_brand_lists(existing: list[str], discovered: list[str]) -> tuple[list[str], list[str]]:
+    return _merge_supplier_lists(existing, discovered)
+
+
 @st.cache_data(show_spinner=False)
-def _load_suppliers_from_uploaded_hicore(uploaded_name: str, uploaded_bytes: bytes) -> list[str]:
+def _load_names_from_uploaded_hicore(
+    uploaded_name: str,
+    uploaded_bytes: bytes,
+) -> tuple[list[str], list[str], bool, bool]:
     del uploaded_name
     df_hicore = _uploaded_csv_to_df(uploaded_bytes, sep=";")
-    return _supplier_names_from_hicore_df(df_hicore)
+    supplier_col = HICORE_COLUMNS["supplier"]
+    brand_col = HICORE_COLUMNS.get("brand")
+    return (
+        _supplier_names_from_hicore_df(df_hicore),
+        _brand_names_from_hicore_df(df_hicore),
+        supplier_col in df_hicore.columns,
+        bool(brand_col and brand_col in df_hicore.columns),
+    )
+
+
+def _normalized_skus_for_excluded_brands(
+    df_hicore: pd.DataFrame,
+    excluded_brands: list[str],
+) -> tuple[set[str], Optional[str]]:
+    selected_brands = _normalize_supplier_names(excluded_brands)
+    if not selected_brands:
+        return set(), None
+
+    brand_col = HICORE_COLUMNS.get("brand")
+    if brand_col is None or brand_col not in df_hicore.columns:
+        return set(), 'HiCore-filen saknar kolumnen "Varumärke". Varumärkesexkludering ignorerades.'
+
+    sku_col = HICORE_COLUMNS["sku"]
+    if sku_col not in df_hicore.columns:
+        return set(), None
+
+    selected_folded = {name.casefold() for name in selected_brands}
+    excluded_normalized_skus: set[str] = set()
+    for _, row in df_hicore.iterrows():
+        raw_brand = row.get(brand_col, "")
+        if pd.isna(raw_brand):
+            continue
+
+        brand_name = str(raw_brand).strip()
+        if brand_name == "" or brand_name.casefold() == "nan":
+            continue
+        if brand_name.casefold() not in selected_folded:
+            continue
+
+        raw_sku = row.get(sku_col, "")
+        if pd.isna(raw_sku):
+            continue
+
+        normalized = normalize_sku(str(raw_sku))
+        if normalized != "":
+            excluded_normalized_skus.add(normalized)
+
+    return excluded_normalized_skus, None
 
 
 def _read_supplier_upload(file_name: str, data: bytes) -> pd.DataFrame:
@@ -190,10 +278,15 @@ def _compute_ui_result(
     supplier_name: str,
     supplier_file_name: Optional[str],
     supplier_bytes: Optional[bytes],
+    excluded_brands: Optional[list[str]] = None,
 ) -> UiResult:
     df_hicore = _uploaded_csv_to_df(hicore_bytes, sep=";")
     df_magento = _uploaded_csv_to_df(magento_bytes, sep=";")
     hicore_map, magento_map = prepare_data(df_hicore, df_magento)
+    excluded_normalized_skus, warning_message = _normalized_skus_for_excluded_brands(
+        df_hicore,
+        excluded_brands or [],
+    )
 
     supplier_map: Optional[ProductMap] = None
     if supplier_file_name and supplier_bytes:
@@ -205,6 +298,7 @@ def _compute_ui_result(
         magento_map,
         supplier_map=supplier_map,
         supplier_internal_name=supplier_name,
+        excluded_normalized_skus=excluded_normalized_skus,
     )
 
     only_in_magento_df = _product_map_to_df(results.only_in_magento)
@@ -236,10 +330,14 @@ def _compute_ui_result(
             if results.internal_only_candidates is not None
             else None
         ),
+        warning_message=warning_message,
     )
 
 
 def _render_results(result: UiResult) -> None:
+    if result.warning_message:
+        st.warning(result.warning_message)
+
     col1, col2, col3 = st.columns(3)
     col1.metric("Only in Magento", result.only_in_magento_count)
     col2.metric("Stock mismatches", result.stock_mismatch_count)
@@ -282,6 +380,7 @@ def main() -> None:
     st.title("ListCompare")
 
     indexed_suppliers, supplier_index_error = _load_suppliers_from_index(SUPPLIER_INDEX_PATH)
+    indexed_brands, brand_index_error = _load_brands_from_index(BRAND_INDEX_PATH)
 
     hicore_file = st.file_uploader(
         "HiCore-export (.csv)",
@@ -300,11 +399,18 @@ def main() -> None:
     )
 
     supplier_options = indexed_suppliers
-    supplier_source = f"leverantörsindex: {SUPPLIER_INDEX_PATH.name}"
+    brand_options = indexed_brands
     new_supplier_names: list[str] = []
+    new_brand_names: list[str] = []
+    hicore_missing_brand_column = False
     if hicore_file is not None:
         try:
-            uploaded_suppliers = _load_suppliers_from_uploaded_hicore(
+            (
+                uploaded_suppliers,
+                uploaded_brands,
+                _has_supplier_column,
+                has_brand_column,
+            ) = _load_names_from_uploaded_hicore(
                 hicore_file.name,
                 hicore_file.getvalue(),
             )
@@ -314,9 +420,17 @@ def main() -> None:
             )
             if new_supplier_names:
                 _save_suppliers_to_index(SUPPLIER_INDEX_PATH, supplier_options)
-            supplier_source = f"leverantörsindex + uppladdad HiCore-fil: {hicore_file.name}"
+
+            brand_options, new_brand_names = _merge_brand_lists(
+                brand_options,
+                uploaded_brands,
+            )
+            if new_brand_names:
+                _save_brands_to_index(BRAND_INDEX_PATH, brand_options)
+
+            hicore_missing_brand_column = not has_brand_column
         except Exception as exc:
-            st.warning(f"Kunde inte läsa leverantörslista från uppladdad HiCore-fil: {exc}")
+            st.warning(f"Kunde inte läsa leverantörs-/varumärkeslista från uppladdad HiCore-fil: {exc}")
 
     scanned_supplier_count = len(supplier_options)
     supplier_internal_name = st.selectbox(
@@ -325,7 +439,13 @@ def main() -> None:
         index=None,
         accept_new_options=True,
         placeholder="Välj leverantör...",
-        
+    )
+    excluded_brands = st.multiselect(
+        "Exkludera varumärken",
+        options=brand_options,
+        default=[],
+        placeholder="Välj ett eller flera varumärken...",
+        disabled=bool(hicore_file is not None and hicore_missing_brand_column),
     )
 
     st.caption(
@@ -338,6 +458,18 @@ def main() -> None:
     if supplier_index_error:
         st.warning(
             f"Kunde inte läsa {SUPPLIER_INDEX_PATH.name} vid uppstart: {supplier_index_error}"
+        )
+    if hicore_file is not None and hicore_missing_brand_column:
+        st.warning('HiCore-filen saknar kolumnen "Varumärke". Varumärkesexkludering är inte tillgänglig för denna fil.')
+
+    st.caption(f"Antal varumärken: {len(brand_options)}.")
+    if new_brand_names:
+        st.success(
+            f"Uppdaterade {BRAND_INDEX_PATH.name} med {len(new_brand_names)} ny(a) varumärke(n)."
+        )
+    if brand_index_error:
+        st.warning(
+            f"Kunde inte läsa {BRAND_INDEX_PATH.name} vid uppstart: {brand_index_error}"
         )
 
     if "ui_result" not in st.session_state:
@@ -360,6 +492,7 @@ def main() -> None:
                     supplier_name=str(supplier_internal_name).strip(),
                     supplier_file_name=supplier_file.name if supplier_file else None,
                     supplier_bytes=supplier_file.getvalue() if supplier_file else None,
+                    excluded_brands=[str(name) for name in excluded_brands],
                 )
                 st.session_state["ui_result"] = result
                 st.session_state["ui_error"] = None
