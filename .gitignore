@@ -26,3 +26,7 @@ Thumbs.db
 
 # Local UI settings
 ui_settings.json
+
+# Local generated indexes
+brand_index.txt
+supplier_index.txt
