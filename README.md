@@ -5,6 +5,10 @@ The project is organized into a clear package structure:
 - `listcompare/core`: domain logic (products, diff, use cases, supplier logic)
 - `listcompare/interfaces`: Streamlit UI
 
+## Installation
+
+- Install dependencies: `pip install -r requirements.txt`
+
 ## Running
 
 - UI: `python -m streamlit run app.py`
