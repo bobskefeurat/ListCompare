@@ -16,6 +16,7 @@ HICORE_COLUMNS = {
     "total_stock": "Totalt lager",
     "reserved": "Reserverade",
     "supplier": "Leverantör",
+    "brand": "Varumärke",
 }
 
 MAGENTO_COLUMNS = {

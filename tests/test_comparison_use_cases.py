@@ -2,6 +2,7 @@ import unittest
 
 from listcompare.core.comparison_use_cases import (
     build_comparison_results,
+    filter_product_map_by_excluded_normalized_skus,
     filter_products_by_supplier_with_sku,
     unique_sorted_skus_from_mismatch_side,
     unique_sorted_skus_from_product_map,
@@ -55,6 +56,42 @@ class ComparisonUseCaseTests(unittest.TestCase):
         self.assertIsNotNone(results.internal_only_candidates)
         assert results.internal_only_candidates is not None
         self.assertEqual(set(results.internal_only_candidates.keys()), {"333"})
+
+    def test_filter_product_map_by_excluded_normalized_skus(self) -> None:
+        product_map = {
+            "00123": [make_product(sku="00123", source="hicore")],
+            "77": [make_product(sku="77", source="hicore")],
+        }
+
+        filtered = filter_product_map_by_excluded_normalized_skus(product_map, {"123"})
+
+        self.assertEqual(set(filtered.keys()), {"77"})
+
+    def test_build_comparison_results_excludes_normalized_skus_from_all_outputs(self) -> None:
+        hicore_map = {
+            "001": [make_product(sku="001", source="hicore", supplier="EM Nordic", stock="5")],
+            "003": [make_product(sku="003", source="hicore", supplier="EM Nordic", stock="2")],
+        }
+        magento_map = {
+            "1": [make_product(sku="1", source="magento", stock="9")],
+            "004": [make_product(sku="004", source="magento", stock="1")],
+        }
+        supplier_map = {
+            "003": [make_product(sku="003", source="supplier")],
+        }
+
+        results = build_comparison_results(
+            hicore_map,
+            magento_map,
+            supplier_map=supplier_map,
+            supplier_internal_name="EM Nordic",
+            excluded_normalized_skus={"1"},
+        )
+
+        self.assertEqual(set(results.only_in_magento.keys()), {"004"})
+        self.assertEqual(results.stock_mismatches, {})
+        assert results.internal_only_candidates is not None
+        self.assertEqual(results.internal_only_candidates, {})
 
     def test_unique_sorted_sku_helpers(self) -> None:
         sku_map = {
