@@ -23,6 +23,9 @@ CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin1")
 SUPPLIER_INDEX_PATH = (Path(__file__).resolve().parents[2] / "supplier_index.txt").resolve()
 BRAND_INDEX_PATH = (Path(__file__).resolve().parents[2] / "brand_index.txt").resolve()
 UI_SETTINGS_PATH = (Path(__file__).resolve().parents[2] / "ui_settings.json").resolve()
+SUPPLIER_TRANSFORM_PROFILES_PATH = (
+    Path(__file__).resolve().parents[2] / "supplier_transform_profiles.json"
+).resolve()
 
 
 MENU_COMPARE = "J\u00e4mf\u00f6r Hicore/Magento"
@@ -71,6 +74,83 @@ class SupplierUiResult:
     warning_message: Optional[str]
 
 
+def _normalize_supplier_transform_profile_mapping(
+    raw_mapping: dict[object, object],
+) -> dict[str, str]:
+    normalized_mapping: dict[str, str] = {}
+    for target_column in SUPPLIER_HICORE_RENAME_COLUMNS:
+        if target_column not in raw_mapping:
+            continue
+        source_column = str(raw_mapping[target_column]).strip()
+        if source_column == "":
+            continue
+        normalized_mapping[target_column] = source_column
+    return normalized_mapping
+
+
+def _load_supplier_transform_profiles(
+    path: Path,
+) -> tuple[dict[str, dict[str, str]], Optional[str]]:
+    if not path.exists():
+        return {}, None
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8-sig"))
+        if not isinstance(raw, dict):
+            raise ValueError("supplier_transform_profiles.json måste innehålla ett JSON-objekt.")
+
+        raw_profiles = raw.get("profiles", raw)
+        if not isinstance(raw_profiles, dict):
+            raise ValueError('Fältet "profiles" måste vara ett JSON-objekt.')
+
+        profiles: dict[str, dict[str, str]] = {}
+        for raw_supplier_name, raw_profile in raw_profiles.items():
+            supplier_name = str(raw_supplier_name).strip()
+            if supplier_name == "":
+                continue
+            if not isinstance(raw_profile, dict):
+                continue
+
+            profile_mapping_raw = raw_profile.get("target_to_source", raw_profile)
+            if not isinstance(profile_mapping_raw, dict):
+                continue
+
+            mapping = _normalize_supplier_transform_profile_mapping(profile_mapping_raw)
+            if mapping:
+                profiles[supplier_name] = mapping
+
+        return profiles, None
+    except Exception as exc:
+        return {}, str(exc)
+
+
+def _save_supplier_transform_profiles(
+    path: Path,
+    *,
+    profiles: dict[str, dict[str, str]],
+) -> Optional[str]:
+    payload_profiles: dict[str, dict[str, str]] = {}
+    for raw_supplier_name, raw_mapping in profiles.items():
+        supplier_name = str(raw_supplier_name).strip()
+        if supplier_name == "":
+            continue
+        mapping = _normalize_supplier_transform_profile_mapping(raw_mapping)
+        if not mapping:
+            continue
+        payload_profiles[supplier_name] = {
+            target: mapping[target]
+            for target in SUPPLIER_HICORE_RENAME_COLUMNS
+            if target in mapping
+        }
+
+    payload = {"profiles": payload_profiles}
+    try:
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return None
+    except Exception as exc:
+        return str(exc)
+
+
 def _load_ui_settings(path: Path) -> tuple[dict[str, list[str]], Optional[str]]:
     default_settings: dict[str, list[str]] = {"excluded_brands": []}
     if not path.exists():
@@ -107,6 +187,9 @@ def _save_ui_settings(path: Path, *, excluded_brands: list[str]) -> Optional[str
 
 def _init_session_state() -> None:
     ui_settings, ui_settings_error = _load_ui_settings(UI_SETTINGS_PATH)
+    supplier_transform_profiles, supplier_transform_profiles_error = _load_supplier_transform_profiles(
+        SUPPLIER_TRANSFORM_PROFILES_PATH
+    )
     defaults = {
         FILE_STATE_KEYS["hicore"]: None,
         FILE_STATE_KEYS["magento"]: None,
@@ -120,6 +203,9 @@ def _init_session_state() -> None:
         "_last_supplier_internal_name": None,
         "ui_settings_load_error": ui_settings_error,
         "ui_settings_save_error": None,
+        "supplier_transform_profiles": dict(supplier_transform_profiles),
+        "supplier_transform_profiles_load_error": supplier_transform_profiles_error,
+        "supplier_transform_profiles_save_error": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -149,6 +235,33 @@ def _persist_excluded_brands_setting() -> None:
     st.session_state["ui_settings_save_error"] = save_error
     if save_error is None:
         st.session_state["ui_settings_load_error"] = None
+
+
+def _persist_supplier_transform_profile(
+    *,
+    supplier_name: str,
+    target_to_source: dict[str, str],
+) -> Optional[str]:
+    normalized_supplier_name = str(supplier_name).strip()
+    if normalized_supplier_name == "":
+        return "Kan inte spara profil utan leverantörsnamn."
+
+    profiles = {
+        str(name): dict(mapping)
+        for name, mapping in st.session_state.get("supplier_transform_profiles", {}).items()
+        if isinstance(name, str) and isinstance(mapping, dict)
+    }
+    profiles[normalized_supplier_name] = _normalize_supplier_transform_profile_mapping(target_to_source)
+
+    save_error = _save_supplier_transform_profiles(
+        SUPPLIER_TRANSFORM_PROFILES_PATH,
+        profiles=profiles,
+    )
+    st.session_state["supplier_transform_profiles_save_error"] = save_error
+    if save_error is None:
+        st.session_state["supplier_transform_profiles"] = profiles
+        st.session_state["supplier_transform_profiles_load_error"] = None
+    return save_error
 
 
 def _get_stored_file(kind: str) -> Optional[dict[str, object]]:
@@ -510,6 +623,13 @@ def _df_csv_bytes(df: pd.DataFrame, *, sep: str = ";") -> bytes:
     return df.to_csv(sep=sep, index=False).encode("utf-8-sig")
 
 
+def _df_excel_bytes(df: pd.DataFrame, *, sheet_name: str = "Sheet1") -> bytes:
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+    return buffer.getvalue()
+
+
 def _find_duplicate_names(values: list[str]) -> list[str]:
     counts: dict[str, int] = {}
     duplicates: list[str] = []
@@ -526,8 +646,13 @@ def _build_supplier_hicore_renamed_copy(
     target_to_source: dict[str, str],
     supplier_name: str,
 ) -> pd.DataFrame:
-    if set(target_to_source.keys()) != set(SUPPLIER_HICORE_RENAME_COLUMNS):
-        raise ValueError("Alla HiCore-kolumner m\u00e5ste vara mappade innan export.")
+    normalized_target_to_source = {
+        str(target).strip(): str(source).strip()
+        for target, source in target_to_source.items()
+        if str(target).strip() in SUPPLIER_HICORE_RENAME_COLUMNS and str(source).strip() != ""
+    }
+    if not normalized_target_to_source:
+        raise ValueError("Matcha minst en HiCore-kolumn innan export.")
     normalized_supplier_name = str(supplier_name).strip()
     if normalized_supplier_name == "":
         raise ValueError("V\u00e4lj leverant\u00f6r fr\u00e5n leverant\u00f6rslistan innan export.")
@@ -535,7 +660,7 @@ def _build_supplier_hicore_renamed_copy(
     prepared_df = df_supplier.copy()
     prepared_df.columns = [str(col).strip() for col in prepared_df.columns]
 
-    selected_sources = [str(source).strip() for source in target_to_source.values()]
+    selected_sources = [str(source).strip() for source in normalized_target_to_source.values()]
     duplicate_sources = _find_duplicate_names(selected_sources)
     if duplicate_sources:
         raise ValueError(
@@ -555,10 +680,16 @@ def _build_supplier_hicore_renamed_copy(
 
     rename_map = {
         str(source).strip(): str(target).strip()
-        for target, source in target_to_source.items()
+        for target, source in normalized_target_to_source.items()
     }
-    renamed_df = prepared_df.rename(columns=rename_map)
+    ordered_targets = [target for target in SUPPLIER_HICORE_RENAME_COLUMNS if target in normalized_target_to_source]
+    ordered_sources = [str(normalized_target_to_source[target]).strip() for target in ordered_targets]
+    renamed_df = prepared_df.loc[:, ordered_sources].copy().rename(columns=rename_map)
     renamed_df[SUPPLIER_HICORE_SUPPLIER_COLUMN] = normalized_supplier_name
+    renamed_df = renamed_df.loc[
+        :,
+        [*ordered_targets, SUPPLIER_HICORE_SUPPLIER_COLUMN],
+    ]
 
     output_columns = [str(col).strip() for col in renamed_df.columns]
     duplicate_output_columns = _find_duplicate_names(output_columns)
@@ -826,7 +957,7 @@ def _render_supplier_transform_tab(
     st.caption(
         f'Kolumnen "{SUPPLIER_HICORE_SUPPLIER_COLUMN}" s\u00e4tts fr\u00e5n vald leverant\u00f6r i leverant\u00f6rslistan.'
     )
-    st.caption("Resultatet exporteras som CSV med semikolon (;).")
+    st.caption("Endast matchade kolumner exporteras. Resultatet exporteras som Excel (.xlsx).")
 
     supplier_file = _render_file_input(
         kind="supplier",
@@ -842,6 +973,17 @@ def _render_supplier_transform_tab(
         st.warning(
             f"Kunde inte l\u00e4sa {SUPPLIER_INDEX_PATH.name} vid uppstart: {supplier_index_error}"
         )
+    if st.session_state.get("supplier_transform_profiles_load_error"):
+        st.warning(
+            "Kunde inte l\u00e4sa "
+            f"{SUPPLIER_TRANSFORM_PROFILES_PATH.name} vid uppstart: "
+            f"{st.session_state['supplier_transform_profiles_load_error']}"
+        )
+    if st.session_state.get("supplier_transform_profiles_save_error"):
+        st.warning(
+            f"Kunde inte spara {SUPPLIER_TRANSFORM_PROFILES_PATH.name}: "
+            f"{st.session_state['supplier_transform_profiles_save_error']}"
+        )
     if not supplier_options:
         st.warning(
             f"Inga leverant\u00f6rer hittades i {SUPPLIER_INDEX_PATH.name}. L\u00e4gg till leverant\u00f6rer f\u00f6rst."
@@ -854,6 +996,18 @@ def _render_supplier_transform_tab(
         placeholder="V\u00e4lj leverant\u00f6r fr\u00e5n supplier_index...",
         key="supplier_transform_internal_name",
     )
+    selected_supplier_name = (
+        str(supplier_internal_name).strip() if supplier_internal_name is not None else ""
+    )
+    supplier_transform_profiles_raw = st.session_state.get("supplier_transform_profiles", {})
+    supplier_transform_profiles = (
+        supplier_transform_profiles_raw if isinstance(supplier_transform_profiles_raw, dict) else {}
+    )
+    saved_profile: dict[str, str] = {}
+    if selected_supplier_name:
+        raw_profile = supplier_transform_profiles.get(selected_supplier_name, {})
+        if isinstance(raw_profile, dict):
+            saved_profile = _normalize_supplier_transform_profile_mapping(raw_profile)
 
     supplier_file_name = str(supplier_file["name"])  # type: ignore[index]
     supplier_bytes = supplier_file["bytes"]  # type: ignore[index]
@@ -881,17 +1035,57 @@ def _render_supplier_transform_tab(
         use_container_width=True,
     )
 
+    if selected_supplier_name == "":
+        st.info("V\u00e4lj leverant\u00f6r f\u00f6r att kunna ladda eller spara en matchningsprofil.")
+    elif saved_profile:
+        valid_saved_targets = [
+            target
+            for target, source in saved_profile.items()
+            if target in SUPPLIER_HICORE_RENAME_COLUMNS and source in source_columns
+        ]
+        missing_saved_targets = [
+            target
+            for target, source in saved_profile.items()
+            if target in SUPPLIER_HICORE_RENAME_COLUMNS and source not in source_columns
+        ]
+        if valid_saved_targets:
+            st.success(
+                f'Sparad matchningsprofil hittad för "{selected_supplier_name}". '
+                f"Förifyller {len(valid_saved_targets)} kolumnval."
+            )
+        if missing_saved_targets:
+            st.warning(
+                "Den sparade profilen matchar inte fullt ut mot aktuell fil. "
+                "Välj om följande HiCore-kolumner: "
+                + ", ".join(missing_saved_targets)
+            )
+    elif selected_supplier_name:
+        st.info(
+            f'Ingen sparad matchningsprofil finns för "{selected_supplier_name}". '
+            "Matcha kolumnerna och spara en profil."
+        )
+
     st.subheader("Matcha mot HiCore-kolumner")
-    file_token = f"{Path(supplier_file_name).name}_{len(supplier_bytes)}"
+    supplier_key_token = selected_supplier_name if selected_supplier_name != "" else "no_supplier"
+    file_token = f"{Path(supplier_file_name).name}_{len(supplier_bytes)}_{supplier_key_token}"
     target_to_source: dict[str, str] = {}
 
     for idx, target_column in enumerate(SUPPLIER_HICORE_RENAME_COLUMNS):
+        widget_key = f"supplier_transform_map_{idx}_{file_token}"
+        saved_source = saved_profile.get(target_column)
+        if (
+            widget_key not in st.session_state
+            and saved_source is not None
+            and str(saved_source).strip() in source_columns
+        ):
+            st.session_state[widget_key] = str(saved_source).strip()
+
         selected_source = st.selectbox(
             target_column,
             options=source_columns,
             index=None,
             placeholder="V\u00e4lj motsvarande kolumn i leverant\u00f6rsfilen...",
-            key=f"supplier_transform_map_{idx}_{file_token}",
+            key=widget_key,
         )
         if selected_source is not None and str(selected_source).strip() != "":
             target_to_source[target_column] = str(selected_source).strip()
@@ -907,14 +1101,6 @@ def _render_supplier_transform_tab(
     missing_target_columns = [
         column for column in SUPPLIER_HICORE_RENAME_COLUMNS if column not in target_to_source
     ]
-    selected_supplier_name = (
-        str(supplier_internal_name).strip() if supplier_internal_name is not None else ""
-    )
-    if missing_target_columns:
-        st.info(
-            f"Matcha alla {len(SUPPLIER_HICORE_RENAME_COLUMNS)} HiCore-kolumner f\u00f6r att skapa exportfilen."
-        )
-        return
     if duplicate_selected_sources:
         return
     if selected_supplier_name == "":
@@ -922,6 +1108,14 @@ def _render_supplier_transform_tab(
             f'V\u00e4lj "{SUPPLIER_HICORE_SUPPLIER_COLUMN}" fr\u00e5n leverant\u00f6rslistan f\u00f6r att skapa exportfilen.'
         )
         return
+    if not target_to_source:
+        st.info("Matcha minst en HiCore-kolumn f\u00f6r att skapa exportfilen.")
+        return
+    if missing_target_columns:
+        st.info(
+            "Omatchade HiCore-kolumner tas inte med i exportfilen: "
+            + ", ".join(missing_target_columns)
+        )
 
     try:
         renamed_df = _build_supplier_hicore_renamed_copy(
@@ -933,12 +1127,48 @@ def _render_supplier_transform_tab(
         st.error(str(exc))
         return
 
+    profile_save_error: Optional[str] = None
+    profile_save_success: Optional[str] = None
+    current_profile_mapping = {
+        target_column: target_to_source[target_column]
+        for target_column in SUPPLIER_HICORE_RENAME_COLUMNS
+        if target_column in target_to_source
+    }
+    has_saved_complete_profile = saved_profile == current_profile_mapping
+    save_profile_label = (
+        "Uppdatera matchningsprofil"
+        if selected_supplier_name in supplier_transform_profiles
+        else "Spara matchningsprofil"
+    )
+    if has_saved_complete_profile and selected_supplier_name != "":
+        st.caption("Aktuell kolumnmappning matchar den sparade profilen för leverantören.")
+
+    if st.button(
+        save_profile_label,
+        type="secondary",
+        key=f"save_supplier_transform_profile_{file_token}",
+    ):
+        profile_save_error = _persist_supplier_transform_profile(
+            supplier_name=selected_supplier_name,
+            target_to_source=current_profile_mapping,
+        )
+        if profile_save_error is None:
+            profile_save_success = f'Matchningsprofil sparad för "{selected_supplier_name}".'
+            saved_profile = dict(current_profile_mapping)
+            supplier_transform_profiles = st.session_state.get("supplier_transform_profiles", {})
+
+    if profile_save_error:
+        st.error(profile_save_error)
+    if profile_save_success:
+        st.success(profile_save_success)
+
     mapping_rows = [
         {
             "HiCore-kolumn": target_column,
             "Leverant\u00f6rskolumn": target_to_source[target_column],
         }
         for target_column in SUPPLIER_HICORE_RENAME_COLUMNS
+        if target_column in target_to_source
     ]
     mapping_rows.append(
         {
@@ -946,19 +1176,24 @@ def _render_supplier_transform_tab(
             "Leverant\u00f6rskolumn": f"V\u00e4rde fr\u00e5n supplier_index: {selected_supplier_name}",
         }
     )
-    st.success("Kolumnmappningen \u00e4r komplett. Exportfilen \u00e4r klar.")
+    if missing_target_columns:
+        st.success(
+            "Delvis kolumnmappning klar. Omatchade HiCore-kolumner utel\u00e4mnas i exportfilen."
+        )
+    else:
+        st.success("Kolumnmappningen \u00e4r komplett. Exportfilen \u00e4r klar.")
     st.dataframe(pd.DataFrame(mapping_rows), use_container_width=True)
 
     preview_rows = min(len(renamed_df), 20)
     st.caption(f"F\u00f6rhandsvisning av resultatet ({preview_rows} f\u00f6rsta raderna)")
     st.dataframe(renamed_df.head(preview_rows), use_container_width=True)
 
-    export_file_name = f"{Path(supplier_file_name).stem}_hicore_kolumnnamn.csv"
+    export_file_name = f"{Path(supplier_file_name).stem}_hicore_kolumnnamn.xlsx"
     st.download_button(
-        label="Ladda ner ombyggd leverant\u00f6rsfil (CSV)",
-        data=_df_csv_bytes(renamed_df, sep=";"),
+        label="Ladda ner ombyggd leverant\u00f6rsfil (Excel)",
+        data=_df_excel_bytes(renamed_df, sheet_name="HiCore-format"),
         file_name=export_file_name,
-        mime="text/csv",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=f"download_supplier_hicore_renamed_{file_token}",
     )
 
