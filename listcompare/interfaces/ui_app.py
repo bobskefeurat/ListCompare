@@ -1,5 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+import csv
 import io
 import json
 from dataclasses import dataclass
@@ -28,6 +29,16 @@ MENU_COMPARE = "J\u00e4mf\u00f6r Hicore/Magento"
 MENU_SUPPLIER = "Hantera leverant\u00f6r"
 MENU_SETTINGS = "Inst\u00e4llningar"
 
+SUPPLIER_HICORE_RENAME_COLUMNS = (
+    "Art.m\u00e4rkning",
+    "Artikelnamn",
+    "Varum\u00e4rke",
+    "Ink\u00f6pspris",
+    "UtprisInklMoms",
+    "Lev.artnr",
+)
+SUPPLIER_HICORE_SUPPLIER_COLUMN = "Leverant\u00f6r"
+
 FILE_STATE_KEYS = {
     "hicore": "stored_hicore_file",
     "magento": "stored_magento_file",
@@ -37,7 +48,7 @@ FILE_STATE_KEYS = {
 UPLOADER_KEYS_BY_KIND = {
     "hicore": ("compare_hicore_uploader", "supplier_hicore_uploader"),
     "magento": ("compare_magento_uploader",),
-    "supplier": ("supplier_file_uploader",),
+    "supplier": ("supplier_file_uploader", "supplier_transform_uploader"),
 }
 
 
@@ -201,6 +212,7 @@ def _uploaded_csv_to_df(
     *,
     sep: str | None,
     engine: Optional[str] = None,
+    extra_read_csv_kwargs: Optional[dict[str, object]] = None,
 ) -> pd.DataFrame:
     last_err: Optional[Exception] = None
     for enc in CSV_ENCODINGS:
@@ -213,12 +225,48 @@ def _uploaded_csv_to_df(
             }
             if engine is not None:
                 kwargs["engine"] = engine
+            if extra_read_csv_kwargs:
+                kwargs.update(extra_read_csv_kwargs)
             return pd.read_csv(io.StringIO(text), **kwargs)
         except UnicodeDecodeError as err:
+            last_err = err
+        except Exception as err:
             last_err = err
     if last_err is not None:
         raise last_err
     raise UnicodeDecodeError("utf-8", b"", 0, 1, "Unable to decode uploaded CSV")
+
+
+def _read_supplier_csv_upload(data: bytes) -> pd.DataFrame:
+    try:
+        return _uploaded_csv_to_df(data, sep=None, engine="python")
+    except Exception as first_error:
+        fallback_error: Exception = first_error
+
+        for sep in (";", ",", "\t", "|"):
+            try:
+                return _uploaded_csv_to_df(data, sep=sep, engine="python")
+            except Exception as err:
+                fallback_error = err
+
+        for sep in (";", ",", "\t", "|"):
+            try:
+                return _uploaded_csv_to_df(
+                    data,
+                    sep=sep,
+                    engine="python",
+                    extra_read_csv_kwargs={
+                        # Fallback for malformed CSV quotes in some supplier exports.
+                        "quoting": csv.QUOTE_NONE,
+                    },
+                )
+            except Exception as err:
+                fallback_error = err
+
+        raise ValueError(
+            "Kunde inte l\u00e4sa CSV-filen. Filen verkar inneh\u00e5lla trasig CSV-formatering "
+            f"(t.ex. citattecken). Originalfel: {first_error}. Senaste fallback-fel: {fallback_error}"
+        ) from first_error
 
 
 def _normalize_supplier_names(raw_names: list[str]) -> list[str]:
@@ -378,7 +426,7 @@ def _normalized_skus_for_excluded_brands(
 def _read_supplier_upload(file_name: str, data: bytes) -> pd.DataFrame:
     suffix = Path(file_name).suffix.lower()
     if suffix == ".csv":
-        return _uploaded_csv_to_df(data, sep=None, engine="python")
+        return _read_supplier_csv_upload(data)
     if suffix in (".xlsx", ".xls", ".xlsm"):
         return pd.read_excel(io.BytesIO(data), dtype=str)
     raise ValueError(f"Unsupported supplier file type: {file_name}")
@@ -428,9 +476,99 @@ def _mismatch_map_to_df(mismatch_map: dict[str, dict[str, list[Product]]]) -> pd
     return pd.DataFrame(rows)
 
 
+def _style_stock_mismatch_df(df: pd.DataFrame):
+    if df.empty:
+        return df.style
+
+    colors = ("#f3f3f3", "#ffffff")
+    row_colors: list[str] = []
+    if "normalized_sku" in df.columns:
+        previous_key: Optional[str] = None
+        group_index = -1
+        for value in df["normalized_sku"].tolist():
+            current_key = "" if pd.isna(value) else str(value)
+            if previous_key is None or current_key != previous_key:
+                group_index += 1
+                previous_key = current_key
+            row_colors.append(colors[group_index % 2])
+    else:
+        row_colors = [colors[(idx // 2) % 2] for idx in range(len(df))]
+
+    index_to_color = dict(zip(df.index.tolist(), row_colors))
+    return df.style.apply(
+        lambda row: [f"background-color: {index_to_color.get(row.name, colors[1])}"] * len(row),
+        axis=1,
+    )
+
+
 def _sku_csv_bytes(skus: list[str]) -> bytes:
     df = pd.DataFrame({"Art.m\u00e4rkning": skus})
     return df.to_csv(sep=";", index=False).encode("utf-8-sig")
+
+
+def _df_csv_bytes(df: pd.DataFrame, *, sep: str = ";") -> bytes:
+    return df.to_csv(sep=sep, index=False).encode("utf-8-sig")
+
+
+def _find_duplicate_names(values: list[str]) -> list[str]:
+    counts: dict[str, int] = {}
+    duplicates: list[str] = []
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+        if counts[value] == 2:
+            duplicates.append(value)
+    return sorted(duplicates, key=lambda item: item.casefold())
+
+
+def _build_supplier_hicore_renamed_copy(
+    df_supplier: pd.DataFrame,
+    *,
+    target_to_source: dict[str, str],
+    supplier_name: str,
+) -> pd.DataFrame:
+    if set(target_to_source.keys()) != set(SUPPLIER_HICORE_RENAME_COLUMNS):
+        raise ValueError("Alla HiCore-kolumner m\u00e5ste vara mappade innan export.")
+    normalized_supplier_name = str(supplier_name).strip()
+    if normalized_supplier_name == "":
+        raise ValueError("V\u00e4lj leverant\u00f6r fr\u00e5n leverant\u00f6rslistan innan export.")
+
+    prepared_df = df_supplier.copy()
+    prepared_df.columns = [str(col).strip() for col in prepared_df.columns]
+
+    selected_sources = [str(source).strip() for source in target_to_source.values()]
+    duplicate_sources = _find_duplicate_names(selected_sources)
+    if duplicate_sources:
+        raise ValueError(
+            "Samma leverant\u00f6rskolumn kan inte mappas till flera HiCore-kolumner: "
+            + ", ".join(duplicate_sources)
+        )
+
+    available_columns = {str(col).strip() for col in prepared_df.columns}
+    missing_sources = sorted(
+        [source for source in selected_sources if source not in available_columns],
+        key=lambda item: item.casefold(),
+    )
+    if missing_sources:
+        raise ValueError(
+            "Vald(e) kolumn(er) finns inte i leverant\u00f6rsfilen: " + ", ".join(missing_sources)
+        )
+
+    rename_map = {
+        str(source).strip(): str(target).strip()
+        for target, source in target_to_source.items()
+    }
+    renamed_df = prepared_df.rename(columns=rename_map)
+    renamed_df[SUPPLIER_HICORE_SUPPLIER_COLUMN] = normalized_supplier_name
+
+    output_columns = [str(col).strip() for col in renamed_df.columns]
+    duplicate_output_columns = _find_duplicate_names(output_columns)
+    if duplicate_output_columns:
+        raise ValueError(
+            "Resultatfilen skulle f\u00e5 dubblettkolumner efter namnbyte: "
+            + ", ".join(duplicate_output_columns)
+        )
+
+    return renamed_df
 
 
 def _compute_compare_result(
@@ -532,7 +670,7 @@ def _render_compare_results(result: CompareUiResult) -> None:
     with tab1:
         st.dataframe(result.only_in_magento_df, use_container_width=True)
     with tab2:
-        st.dataframe(result.stock_mismatch_df, use_container_width=True)
+        st.dataframe(_style_stock_mismatch_df(result.stock_mismatch_df), use_container_width=True)
 
 
 def _render_supplier_results(result: SupplierUiResult) -> None:
@@ -602,15 +740,13 @@ def _render_compare_page(*, excluded_brands: list[str]) -> None:
         _render_compare_results(st.session_state["compare_ui_result"])
 
 
-def _render_supplier_page(
+def _render_supplier_compare_tab(
     *,
     supplier_options: list[str],
     supplier_index_error: Optional[str],
     new_supplier_names: list[str],
     excluded_brands: list[str],
 ) -> None:
-    st.header(MENU_SUPPLIER)
-
     hicore_file = _render_file_input(
         kind="hicore",
         label="HiCore-export (.csv)",
@@ -677,6 +813,178 @@ def _render_supplier_page(
         st.error(st.session_state["supplier_ui_error"])
     if st.session_state["supplier_ui_result"] is not None:
         _render_supplier_results(st.session_state["supplier_ui_result"])
+
+
+def _render_supplier_transform_tab(
+    *,
+    supplier_options: list[str],
+    supplier_index_error: Optional[str],
+) -> None:
+    st.caption(
+        "Matcha leverant\u00f6rens kolumner mot HiCore-kolumner och exportera en kopia med omd\u00f6pta kolumnnamn."
+    )
+    st.caption(
+        f'Kolumnen "{SUPPLIER_HICORE_SUPPLIER_COLUMN}" s\u00e4tts fr\u00e5n vald leverant\u00f6r i leverant\u00f6rslistan.'
+    )
+    st.caption("Resultatet exporteras som CSV med semikolon (;).")
+
+    supplier_file = _render_file_input(
+        kind="supplier",
+        label="Leverant\u00f6rsfil (.csv/.xlsx/.xls/.xlsm)",
+        file_types=["csv", "xlsx", "xls", "xlsm"],
+        uploader_key="supplier_transform_uploader",
+    )
+    if supplier_file is None:
+        st.info("Ladda upp en leverant\u00f6rsfil f\u00f6r att mappa kolumner.")
+        return
+
+    if supplier_index_error:
+        st.warning(
+            f"Kunde inte l\u00e4sa {SUPPLIER_INDEX_PATH.name} vid uppstart: {supplier_index_error}"
+        )
+    if not supplier_options:
+        st.warning(
+            f"Inga leverant\u00f6rer hittades i {SUPPLIER_INDEX_PATH.name}. L\u00e4gg till leverant\u00f6rer f\u00f6rst."
+        )
+        return
+    supplier_internal_name = st.selectbox(
+        "Leverant\u00f6r",
+        options=supplier_options,
+        index=None,
+        placeholder="V\u00e4lj leverant\u00f6r fr\u00e5n supplier_index...",
+        key="supplier_transform_internal_name",
+    )
+
+    supplier_file_name = str(supplier_file["name"])  # type: ignore[index]
+    supplier_bytes = supplier_file["bytes"]  # type: ignore[index]
+    try:
+        df_supplier = _read_supplier_upload(supplier_file_name, supplier_bytes)
+    except Exception as exc:
+        st.error(f"Kunde inte l\u00e4sa leverant\u00f6rsfilen: {exc}")
+        return
+
+    source_columns = [str(col).strip() for col in df_supplier.columns]
+    if not source_columns:
+        st.warning("Leverant\u00f6rsfilen inneh\u00e5ller inga kolumnnamn.")
+        return
+
+    duplicate_source_columns = _find_duplicate_names(source_columns)
+    if duplicate_source_columns:
+        st.warning(
+            "Filen inneh\u00e5ller dubblettkolumnnamn. Det kan g\u00f6ra mappningen tvetydig: "
+            + ", ".join(duplicate_source_columns)
+        )
+
+    st.caption(f"Antal kolumner i leverant\u00f6rsfilen: {len(source_columns)}")
+    st.dataframe(
+        pd.DataFrame({"Leverant\u00f6rskolumner": source_columns}),
+        use_container_width=True,
+    )
+
+    st.subheader("Matcha mot HiCore-kolumner")
+    file_token = f"{Path(supplier_file_name).name}_{len(supplier_bytes)}"
+    target_to_source: dict[str, str] = {}
+
+    for idx, target_column in enumerate(SUPPLIER_HICORE_RENAME_COLUMNS):
+        selected_source = st.selectbox(
+            target_column,
+            options=source_columns,
+            index=None,
+            placeholder="V\u00e4lj motsvarande kolumn i leverant\u00f6rsfilen...",
+            key=f"supplier_transform_map_{idx}_{file_token}",
+        )
+        if selected_source is not None and str(selected_source).strip() != "":
+            target_to_source[target_column] = str(selected_source).strip()
+
+    selected_sources = [target_to_source[target] for target in target_to_source]
+    duplicate_selected_sources = _find_duplicate_names(selected_sources)
+    if duplicate_selected_sources:
+        st.error(
+            "Du har valt samma leverant\u00f6rskolumn flera g\u00e5nger: "
+            + ", ".join(duplicate_selected_sources)
+        )
+
+    missing_target_columns = [
+        column for column in SUPPLIER_HICORE_RENAME_COLUMNS if column not in target_to_source
+    ]
+    selected_supplier_name = (
+        str(supplier_internal_name).strip() if supplier_internal_name is not None else ""
+    )
+    if missing_target_columns:
+        st.info(
+            f"Matcha alla {len(SUPPLIER_HICORE_RENAME_COLUMNS)} HiCore-kolumner f\u00f6r att skapa exportfilen."
+        )
+        return
+    if duplicate_selected_sources:
+        return
+    if selected_supplier_name == "":
+        st.info(
+            f'V\u00e4lj "{SUPPLIER_HICORE_SUPPLIER_COLUMN}" fr\u00e5n leverant\u00f6rslistan f\u00f6r att skapa exportfilen.'
+        )
+        return
+
+    try:
+        renamed_df = _build_supplier_hicore_renamed_copy(
+            df_supplier,
+            target_to_source=target_to_source,
+            supplier_name=selected_supplier_name,
+        )
+    except Exception as exc:
+        st.error(str(exc))
+        return
+
+    mapping_rows = [
+        {
+            "HiCore-kolumn": target_column,
+            "Leverant\u00f6rskolumn": target_to_source[target_column],
+        }
+        for target_column in SUPPLIER_HICORE_RENAME_COLUMNS
+    ]
+    mapping_rows.append(
+        {
+            "HiCore-kolumn": SUPPLIER_HICORE_SUPPLIER_COLUMN,
+            "Leverant\u00f6rskolumn": f"V\u00e4rde fr\u00e5n supplier_index: {selected_supplier_name}",
+        }
+    )
+    st.success("Kolumnmappningen \u00e4r komplett. Exportfilen \u00e4r klar.")
+    st.dataframe(pd.DataFrame(mapping_rows), use_container_width=True)
+
+    preview_rows = min(len(renamed_df), 20)
+    st.caption(f"F\u00f6rhandsvisning av resultatet ({preview_rows} f\u00f6rsta raderna)")
+    st.dataframe(renamed_df.head(preview_rows), use_container_width=True)
+
+    export_file_name = f"{Path(supplier_file_name).stem}_hicore_kolumnnamn.csv"
+    st.download_button(
+        label="Ladda ner ombyggd leverant\u00f6rsfil (CSV)",
+        data=_df_csv_bytes(renamed_df, sep=";"),
+        file_name=export_file_name,
+        mime="text/csv",
+        key=f"download_supplier_hicore_renamed_{file_token}",
+    )
+
+
+def _render_supplier_page(
+    *,
+    supplier_options: list[str],
+    supplier_index_error: Optional[str],
+    new_supplier_names: list[str],
+    excluded_brands: list[str],
+) -> None:
+    st.header(MENU_SUPPLIER)
+
+    compare_tab, transform_tab = st.tabs(["J\u00e4mf\u00f6relse", "Bygg om till HiCore-format"])
+    with compare_tab:
+        _render_supplier_compare_tab(
+            supplier_options=supplier_options,
+            supplier_index_error=supplier_index_error,
+            new_supplier_names=new_supplier_names,
+            excluded_brands=excluded_brands,
+        )
+    with transform_tab:
+        _render_supplier_transform_tab(
+            supplier_options=supplier_options,
+            supplier_index_error=supplier_index_error,
+        )
 
 
 def _render_settings_page(
