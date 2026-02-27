@@ -11,7 +11,7 @@ The project is organized into a clear package structure:
 
 ## Running
 
-- UI: `python -m streamlit run app.py`
+- UI: `py -m streamlit run app.py`
 
 The root file `app.py` is an entrypoint that forwards to `listcompare/interfaces/ui_app.py`.
 

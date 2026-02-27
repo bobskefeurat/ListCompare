@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+from datetime import date
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -17,7 +18,7 @@ from ..core.comparison_use_cases import (
 )
 from ..core.product_diff import ProductMap, normalize_sku
 from ..core.product_model import HICORE_COLUMNS, Product, build_product_map, prepare_data
-from ..core.supplier_products import build_supplier_map
+from ..core.supplier_products import build_supplier_map, find_supplier_id_column
 
 CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin1")
 SUPPLIER_INDEX_PATH = (Path(__file__).resolve().parents[2] / "supplier_index.txt").resolve()
@@ -31,6 +32,10 @@ SUPPLIER_TRANSFORM_PROFILES_PATH = (
 MENU_COMPARE = "J\u00e4mf\u00f6r Hicore/Magento"
 MENU_SUPPLIER = "Hantera leverant\u00f6r"
 MENU_SETTINGS = "Inst\u00e4llningar"
+SUPPLIER_PAGE_VIEW_COMPARE = "J\u00e4mf\u00f6relse"
+SUPPLIER_PAGE_VIEW_TRANSFORM = "Leverant\u00f6rsprofiler"
+SUPPLIER_PROFILE_MODE_OVERVIEW = "overview"
+SUPPLIER_PROFILE_MODE_EDITOR = "editor"
 
 SUPPLIER_HICORE_RENAME_COLUMNS = (
     "Art.m\u00e4rkning",
@@ -41,6 +46,14 @@ SUPPLIER_HICORE_RENAME_COLUMNS = (
     "Lev.artnr",
 )
 SUPPLIER_HICORE_SUPPLIER_COLUMN = "Leverant\u00f6r"
+SUPPLIER_HICORE_SKU_COLUMN = "Art.m\u00e4rkning"
+
+SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS = "strip_leading_zeros_from_sku"
+SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU = "ignore_rows_missing_sku"
+SUPPLIER_TRANSFORM_DEFAULT_OPTIONS: dict[str, bool] = {
+    SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS: False,
+    SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU: False,
+}
 
 FILE_STATE_KEYS = {
     "hicore": "stored_hicore_file",
@@ -88,9 +101,209 @@ def _normalize_supplier_transform_profile_mapping(
     return normalized_mapping
 
 
+def _normalize_supplier_transform_profile_options(
+    raw_options: dict[object, object],
+) -> dict[str, bool]:
+    normalized_options = dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS)
+    for option_name, default_value in SUPPLIER_TRANSFORM_DEFAULT_OPTIONS.items():
+        raw_value = raw_options.get(option_name, default_value)
+        if isinstance(raw_value, bool):
+            normalized_options[option_name] = raw_value
+            continue
+        if isinstance(raw_value, (int, float)):
+            normalized_options[option_name] = bool(raw_value)
+            continue
+        if isinstance(raw_value, str):
+            folded = raw_value.strip().casefold()
+            if folded in ("1", "true", "yes", "ja", "on"):
+                normalized_options[option_name] = True
+            elif folded in ("0", "false", "no", "nej", "off", ""):
+                normalized_options[option_name] = False
+    return normalized_options
+
+
+def _normalize_supplier_transform_profile(
+    raw_profile: dict[object, object],
+) -> tuple[dict[str, str], dict[str, bool]]:
+    profile_mapping_raw = raw_profile.get("target_to_source", raw_profile)
+    mapping = (
+        _normalize_supplier_transform_profile_mapping(profile_mapping_raw)
+        if isinstance(profile_mapping_raw, dict)
+        else {}
+    )
+    raw_options = raw_profile.get("options", {})
+    options = (
+        _normalize_supplier_transform_profile_options(raw_options)
+        if isinstance(raw_options, dict)
+        else dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS)
+    )
+    return mapping, options
+
+
+def _ordered_supplier_transform_profile_mapping(mapping: dict[str, str]) -> dict[str, str]:
+    return {
+        target: mapping[target]
+        for target in SUPPLIER_HICORE_RENAME_COLUMNS
+        if target in mapping
+    }
+
+
+def _get_supplier_transform_profile(
+    supplier_name: str,
+) -> tuple[dict[str, str], dict[str, bool]]:
+    normalized_supplier_name = str(supplier_name).strip()
+    if normalized_supplier_name == "":
+        return {}, dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS)
+    raw_profiles = st.session_state.get("supplier_transform_profiles", {})
+    if not isinstance(raw_profiles, dict):
+        return {}, dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS)
+    raw_profile = raw_profiles.get(normalized_supplier_name, {})
+    if not isinstance(raw_profile, dict):
+        return {}, dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS)
+    return _normalize_supplier_transform_profile(raw_profile)
+
+
+def _normalize_selected_supplier_for_options(
+    selected_supplier: object,
+    supplier_options: list[str],
+) -> Optional[str]:
+    if selected_supplier is None:
+        return None
+    selected = str(selected_supplier).strip()
+    if selected == "":
+        return None
+    return selected if selected in supplier_options else None
+
+
+def _sync_selected_supplier_between_views(
+    selected_supplier: Optional[str],
+    supplier_options: list[str],
+    *,
+    target_key: str,
+) -> None:
+    normalized = _normalize_selected_supplier_for_options(selected_supplier, supplier_options)
+    if st.session_state.get(target_key) != normalized:
+        st.session_state[target_key] = normalized
+    st.session_state["_last_supplier_internal_name"] = normalized
+
+
+def _sync_supplier_selection_session_state(supplier_options: list[str]) -> None:
+    normalized_compare_supplier = _normalize_selected_supplier_for_options(
+        st.session_state.get("supplier_internal_name"),
+        supplier_options,
+    )
+    canonical_supplier = normalized_compare_supplier
+    if st.session_state.get("supplier_internal_name") != canonical_supplier:
+        st.session_state["supplier_internal_name"] = canonical_supplier
+    if st.session_state.get("supplier_transform_internal_name") != canonical_supplier:
+        st.session_state["supplier_transform_internal_name"] = canonical_supplier
+    st.session_state["_last_supplier_internal_name"] = canonical_supplier
+
+
+def _profile_has_required_sku_mapping(mapping: dict[str, str]) -> bool:
+    return str(mapping.get(SUPPLIER_HICORE_SKU_COLUMN, "")).strip() != ""
+
+
+def _missing_profile_source_columns(
+    mapping: dict[str, str],
+    source_columns: list[str],
+) -> list[str]:
+    available_columns = {str(column).strip() for column in source_columns}
+    missing = {
+        str(source).strip()
+        for source in mapping.values()
+        if str(source).strip() not in available_columns
+    }
+    return sorted(missing, key=lambda item: item.casefold())
+
+
+def _matches_profile_output_format(
+    mapping: dict[str, str],
+    source_columns: list[str],
+) -> bool:
+    available_columns = {str(column).strip() for column in source_columns}
+    required_targets = [
+        target for target in SUPPLIER_HICORE_RENAME_COLUMNS if str(mapping.get(target, "")).strip() != ""
+    ]
+    if not required_targets:
+        return False
+    has_all_targets = all(target in available_columns for target in required_targets)
+    has_supplier_column = SUPPLIER_HICORE_SUPPLIER_COLUMN in available_columns
+    return has_all_targets and has_supplier_column
+
+
+def _supplier_has_saved_profile(supplier_name: str) -> bool:
+    mapping, _ = _get_supplier_transform_profile(supplier_name)
+    return bool(mapping)
+
+
+def _split_suppliers_by_profile(supplier_options: list[str]) -> tuple[list[str], list[str]]:
+    suppliers_with_profile: list[str] = []
+    suppliers_without_profile: list[str] = []
+    for supplier_name in supplier_options:
+        if _supplier_has_saved_profile(supplier_name):
+            suppliers_with_profile.append(supplier_name)
+        else:
+            suppliers_without_profile.append(supplier_name)
+    return suppliers_with_profile, suppliers_without_profile
+
+
+def _filter_supplier_names(names: list[str], query: str) -> list[str]:
+    normalized_query = str(query).strip().casefold()
+    if normalized_query == "":
+        return list(names)
+    return [name for name in names if normalized_query in str(name).casefold()]
+
+
+def _selected_dataframe_row_index(selection_event: object) -> Optional[int]:
+    selection = getattr(selection_event, "selection", None)
+    if selection is None:
+        return None
+
+    selected_rows = getattr(selection, "rows", None)
+    if isinstance(selected_rows, (list, tuple)) and selected_rows:
+        try:
+            return int(selected_rows[0])
+        except Exception:
+            pass
+
+    selected_cells = getattr(selection, "cells", None)
+    if isinstance(selected_cells, (list, tuple)) and selected_cells:
+        first_cell = selected_cells[0]
+        if isinstance(first_cell, dict):
+            row_value = first_cell.get("row")
+            try:
+                return int(row_value)
+            except Exception:
+                return None
+        if isinstance(first_cell, (list, tuple)) and first_cell:
+            try:
+                return int(first_cell[0])
+            except Exception:
+                return None
+    return None
+
+
+def _safe_filename_part(value: str) -> str:
+    invalid_chars = '<>:"/\\|?*'
+    cleaned = "".join("_" if ch in invalid_chars else ch for ch in str(value).strip())
+    cleaned = "_".join(part for part in cleaned.split())
+    return cleaned if cleaned != "" else "leverantor"
+
+
+def _rebuilt_supplier_file_name(supplier_name: str, *, extension: str = ".xlsx") -> str:
+    safe_supplier = _safe_filename_part(supplier_name)
+    normalized_extension = str(extension).strip()
+    if normalized_extension == "":
+        normalized_extension = ".xlsx"
+    if not normalized_extension.startswith("."):
+        normalized_extension = f".{normalized_extension}"
+    return f"{safe_supplier}_prislista_{date.today().isoformat()}{normalized_extension}"
+
+
 def _load_supplier_transform_profiles(
     path: Path,
-) -> tuple[dict[str, dict[str, str]], Optional[str]]:
+) -> tuple[dict[str, dict[str, object]], Optional[str]]:
     if not path.exists():
         return {}, None
 
@@ -103,7 +316,7 @@ def _load_supplier_transform_profiles(
         if not isinstance(raw_profiles, dict):
             raise ValueError('Fältet "profiles" måste vara ett JSON-objekt.')
 
-        profiles: dict[str, dict[str, str]] = {}
+        profiles: dict[str, dict[str, object]] = {}
         for raw_supplier_name, raw_profile in raw_profiles.items():
             supplier_name = str(raw_supplier_name).strip()
             if supplier_name == "":
@@ -111,13 +324,12 @@ def _load_supplier_transform_profiles(
             if not isinstance(raw_profile, dict):
                 continue
 
-            profile_mapping_raw = raw_profile.get("target_to_source", raw_profile)
-            if not isinstance(profile_mapping_raw, dict):
-                continue
-
-            mapping = _normalize_supplier_transform_profile_mapping(profile_mapping_raw)
+            mapping, options = _normalize_supplier_transform_profile(raw_profile)
             if mapping:
-                profiles[supplier_name] = mapping
+                profiles[supplier_name] = {
+                    "target_to_source": _ordered_supplier_transform_profile_mapping(mapping),
+                    "options": options,
+                }
 
         return profiles, None
     except Exception as exc:
@@ -127,20 +339,21 @@ def _load_supplier_transform_profiles(
 def _save_supplier_transform_profiles(
     path: Path,
     *,
-    profiles: dict[str, dict[str, str]],
+    profiles: dict[str, dict[str, object]],
 ) -> Optional[str]:
-    payload_profiles: dict[str, dict[str, str]] = {}
-    for raw_supplier_name, raw_mapping in profiles.items():
+    payload_profiles: dict[str, dict[str, object]] = {}
+    for raw_supplier_name, raw_profile in profiles.items():
         supplier_name = str(raw_supplier_name).strip()
         if supplier_name == "":
             continue
-        mapping = _normalize_supplier_transform_profile_mapping(raw_mapping)
+        if not isinstance(raw_profile, dict):
+            continue
+        mapping, options = _normalize_supplier_transform_profile(raw_profile)
         if not mapping:
             continue
         payload_profiles[supplier_name] = {
-            target: mapping[target]
-            for target in SUPPLIER_HICORE_RENAME_COLUMNS
-            if target in mapping
+            "target_to_source": _ordered_supplier_transform_profile_mapping(mapping),
+            "options": options,
         }
 
     payload = {"profiles": payload_profiles}
@@ -200,12 +413,24 @@ def _init_session_state() -> None:
         "supplier_ui_error": None,
         "excluded_brands": list(ui_settings.get("excluded_brands", [])),
         "supplier_internal_name": None,
+        "supplier_transform_internal_name": None,
         "_last_supplier_internal_name": None,
         "ui_settings_load_error": ui_settings_error,
         "ui_settings_save_error": None,
         "supplier_transform_profiles": dict(supplier_transform_profiles),
         "supplier_transform_profiles_load_error": supplier_transform_profiles_error,
         "supplier_transform_profiles_save_error": None,
+        "supplier_page_view": SUPPLIER_PAGE_VIEW_COMPARE,
+        "supplier_page_view_last_rendered": SUPPLIER_PAGE_VIEW_COMPARE,
+        "supplier_page_view_request": None,
+        "supplier_profiles_mode": SUPPLIER_PROFILE_MODE_OVERVIEW,
+        "supplier_profiles_mode_request": None,
+        "supplier_profiles_supplier_request": None,
+        "supplier_profiles_active_supplier": None,
+        "supplier_profiles_search_query": "",
+        "supplier_profiles_delete_confirm": False,
+        "supplier_transform_attention_required": False,
+        "supplier_compare_info_message": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -241,17 +466,60 @@ def _persist_supplier_transform_profile(
     *,
     supplier_name: str,
     target_to_source: dict[str, str],
+    options: dict[str, bool],
 ) -> Optional[str]:
     normalized_supplier_name = str(supplier_name).strip()
     if normalized_supplier_name == "":
         return "Kan inte spara profil utan leverantörsnamn."
 
-    profiles = {
-        str(name): dict(mapping)
-        for name, mapping in st.session_state.get("supplier_transform_profiles", {}).items()
-        if isinstance(name, str) and isinstance(mapping, dict)
+    profiles: dict[str, dict[str, object]] = {}
+    for name, raw_profile in st.session_state.get("supplier_transform_profiles", {}).items():
+        if not isinstance(name, str) or not isinstance(raw_profile, dict):
+            continue
+        mapping, normalized_options = _normalize_supplier_transform_profile(raw_profile)
+        if not mapping:
+            continue
+        profiles[name] = {
+            "target_to_source": _ordered_supplier_transform_profile_mapping(mapping),
+            "options": normalized_options,
+        }
+
+    profiles[normalized_supplier_name] = {
+        "target_to_source": _ordered_supplier_transform_profile_mapping(
+            _normalize_supplier_transform_profile_mapping(target_to_source)
+        ),
+        "options": _normalize_supplier_transform_profile_options(options),
     }
-    profiles[normalized_supplier_name] = _normalize_supplier_transform_profile_mapping(target_to_source)
+
+    save_error = _save_supplier_transform_profiles(
+        SUPPLIER_TRANSFORM_PROFILES_PATH,
+        profiles=profiles,
+    )
+    st.session_state["supplier_transform_profiles_save_error"] = save_error
+    if save_error is None:
+        st.session_state["supplier_transform_profiles"] = profiles
+        st.session_state["supplier_transform_profiles_load_error"] = None
+    return save_error
+
+
+def _delete_supplier_transform_profile(*, supplier_name: str) -> Optional[str]:
+    normalized_supplier_name = str(supplier_name).strip()
+    if normalized_supplier_name == "":
+        return "Kan inte ta bort profil utan leverantörsnamn."
+
+    profiles: dict[str, dict[str, object]] = {}
+    for name, raw_profile in st.session_state.get("supplier_transform_profiles", {}).items():
+        if not isinstance(name, str) or not isinstance(raw_profile, dict):
+            continue
+        if name.strip().casefold() == normalized_supplier_name.casefold():
+            continue
+        mapping, normalized_options = _normalize_supplier_transform_profile(raw_profile)
+        if not mapping:
+            continue
+        profiles[name] = {
+            "target_to_source": _ordered_supplier_transform_profile_mapping(mapping),
+            "options": normalized_options,
+        }
 
     save_error = _save_supplier_transform_profiles(
         SUPPLIER_TRANSFORM_PROFILES_PATH,
@@ -289,6 +557,16 @@ def _rerun() -> None:
         rerun_fn()
         return
     st.experimental_rerun()
+
+
+def _request_supplier_profile_editor(supplier_name: str) -> None:
+    normalized_supplier_name = str(supplier_name).strip()
+    if normalized_supplier_name == "":
+        return
+    st.session_state["supplier_page_view_request"] = SUPPLIER_PAGE_VIEW_TRANSFORM
+    st.session_state["supplier_profiles_mode_request"] = SUPPLIER_PROFILE_MODE_EDITOR
+    st.session_state["supplier_profiles_supplier_request"] = normalized_supplier_name
+    _rerun()
 
 
 def _render_file_input(
@@ -640,11 +918,30 @@ def _find_duplicate_names(values: list[str]) -> list[str]:
     return sorted(duplicates, key=lambda item: item.casefold())
 
 
+def _normalize_supplier_transform_sku_value(
+    raw_value: object,
+    *,
+    strip_leading_zeros: bool,
+) -> str:
+    if pd.isna(raw_value):
+        return ""
+    value = str(raw_value).strip()
+    if value == "" or value.casefold() == "nan":
+        return ""
+    if strip_leading_zeros:
+        value = value.lstrip("0")
+        if value == "":
+            return "0"
+    return value
+
+
 def _build_supplier_hicore_renamed_copy(
     df_supplier: pd.DataFrame,
     *,
     target_to_source: dict[str, str],
     supplier_name: str,
+    strip_leading_zeros_from_sku: bool = False,
+    ignore_rows_missing_sku: bool = False,
 ) -> pd.DataFrame:
     normalized_target_to_source = {
         str(target).strip(): str(source).strip()
@@ -677,6 +974,18 @@ def _build_supplier_hicore_renamed_copy(
         raise ValueError(
             "Vald(e) kolumn(er) finns inte i leverant\u00f6rsfilen: " + ", ".join(missing_sources)
         )
+
+    sku_source_column = normalized_target_to_source.get(SUPPLIER_HICORE_SKU_COLUMN)
+    if sku_source_column is not None:
+        normalized_sku_values = prepared_df[sku_source_column].map(
+            lambda raw_value: _normalize_supplier_transform_sku_value(
+                raw_value,
+                strip_leading_zeros=strip_leading_zeros_from_sku,
+            )
+        )
+        prepared_df.loc[:, sku_source_column] = normalized_sku_values
+        if ignore_rows_missing_sku:
+            prepared_df = prepared_df.loc[normalized_sku_values != ""].copy()
 
     rename_map = {
         str(source).strip(): str(target).strip()
@@ -878,6 +1187,13 @@ def _render_supplier_compare_tab(
     new_supplier_names: list[str],
     excluded_brands: list[str],
 ) -> None:
+    normalized_compare_supplier = _normalize_selected_supplier_for_options(
+        st.session_state.get("supplier_internal_name"),
+        supplier_options,
+    )
+    if st.session_state.get("supplier_internal_name") != normalized_compare_supplier:
+        st.session_state["supplier_internal_name"] = normalized_compare_supplier
+
     hicore_file = _render_file_input(
         kind="hicore",
         label="HiCore-export (.csv)",
@@ -890,6 +1206,10 @@ def _render_supplier_compare_tab(
         file_types=["csv", "xlsx", "xls", "xlsm"],
         uploader_key="supplier_file_uploader",
     )
+    info_message = st.session_state.get("supplier_compare_info_message")
+    if info_message:
+        st.success(str(info_message))
+        st.session_state["supplier_compare_info_message"] = None
 
     previous_supplier_name = st.session_state.get("_last_supplier_internal_name")
     supplier_internal_name = st.selectbox(
@@ -902,24 +1222,165 @@ def _render_supplier_compare_tab(
     if previous_supplier_name != supplier_internal_name:
         st.session_state["_last_supplier_internal_name"] = supplier_internal_name
         _clear_supplier_state()
+    selected_supplier_name = (
+        str(supplier_internal_name).strip() if supplier_internal_name is not None else ""
+    )
+    if st.session_state.get("supplier_profiles_active_supplier") != (
+        selected_supplier_name if selected_supplier_name != "" else None
+    ):
+        st.session_state["supplier_profiles_active_supplier"] = (
+            selected_supplier_name if selected_supplier_name != "" else None
+        )
+    _sync_selected_supplier_between_views(
+        selected_supplier_name if selected_supplier_name != "" else None,
+        supplier_options,
+        target_key="supplier_transform_internal_name",
+    )
+
+    profile_mapping, profile_options = _get_supplier_transform_profile(selected_supplier_name)
+    profile_exists = bool(profile_mapping)
+    profile_has_required_sku = _profile_has_required_sku_mapping(profile_mapping)
+    profile_ready = profile_exists and profile_has_required_sku
+    st.session_state["supplier_transform_attention_required"] = (
+        selected_supplier_name != "" and not profile_ready
+    )
+
+    supplier_file_read_error: Optional[str] = None
+    supplier_file_direct_compare_format = False
+    profile_matches_uploaded_file = False
+    file_matches_profile_output_format = False
+    missing_profile_columns_for_file: list[str] = []
+    df_supplier_uploaded: Optional[pd.DataFrame] = None
+    if supplier_file is not None:
+        supplier_file_name = str(supplier_file["name"])  # type: ignore[index]
+        supplier_bytes = supplier_file["bytes"]  # type: ignore[index]
+        try:
+            df_supplier_uploaded = _read_supplier_upload(supplier_file_name, supplier_bytes)
+            source_columns = [str(column).strip() for column in df_supplier_uploaded.columns]
+            try:
+                find_supplier_id_column(df_supplier_uploaded)
+                supplier_file_direct_compare_format = True
+            except Exception:
+                supplier_file_direct_compare_format = False
+
+            if profile_ready:
+                missing_profile_columns_for_file = _missing_profile_source_columns(
+                    profile_mapping,
+                    source_columns,
+                )
+                profile_matches_uploaded_file = len(missing_profile_columns_for_file) == 0
+                file_matches_profile_output_format = _matches_profile_output_format(
+                    profile_mapping,
+                    source_columns,
+                )
+        except Exception as exc:
+            supplier_file_read_error = str(exc)
+
+    if selected_supplier_name == "":
+        st.info("V\u00e4lj leverant\u00f6r f\u00f6r att kontrollera profilstatus.")
+    elif not profile_exists:
+        st.error(
+            f'Saknar sparad leverant\u00f6rsprofil f\u00f6r "{selected_supplier_name}". '
+            "Skapa en profil i fliken Leverantörsprofiler."
+        )
+    elif not profile_has_required_sku:
+        st.error(
+            f'Profilen f\u00f6r "{selected_supplier_name}" saknar mappning av "{SUPPLIER_HICORE_SKU_COLUMN}". '
+            "SKU m\u00e5ste alltid vara matchad."
+        )
+    else:
+        st.success(f'F\u00e4rdig leverant\u00f6rsprofil hittad f\u00f6r "{selected_supplier_name}".')
+
+    if supplier_file is not None:
+        if supplier_file_read_error is not None:
+            st.error(f"Kunde inte l\u00e4sa leverant\u00f6rsfilen: {supplier_file_read_error}")
+        elif profile_ready and file_matches_profile_output_format:
+            st.success("Uppladdad leverant\u00f6rsfil matchar redan sparad profil i HiCore-format.")
+        elif profile_ready and profile_matches_uploaded_file:
+            st.info(
+                "Leverant\u00f6rsfilen kan byggas om via profil. Tryck p\u00e5 \"Bygg om till Hicore-format\"."
+            )
+        elif profile_ready:
+            st.warning(
+                "Uppladdad leverant\u00f6rsfil matchar inte den sparade profilen. Saknade kolumner: "
+                + ", ".join(missing_profile_columns_for_file)
+            )
 
     can_run = (
         hicore_file is not None
         and supplier_file is not None
-        and supplier_internal_name is not None
-        and str(supplier_internal_name).strip() != ""
+        and selected_supplier_name != ""
+        and profile_ready
+        and supplier_file_read_error is None
+        and supplier_file_direct_compare_format
     )
-    if st.button(
+    run_clicked = st.button(
         "K\u00f6r J\u00e4mf\u00f6relse",
         type="primary",
         disabled=not can_run,
         key="run_supplier_button",
+    )
+
+    can_rebuild_uploaded_file = (
+        supplier_file is not None
+        and selected_supplier_name != ""
+        and profile_ready
+        and supplier_file_read_error is None
+        and profile_matches_uploaded_file
+        and not file_matches_profile_output_format
+        and df_supplier_uploaded is not None
+    )
+    can_manage_profile = selected_supplier_name != ""
+    profile_action_label = (
+        "Uppdatera leverant\u00f6rsprofil" if profile_exists else "Skapa leverant\u00f6rsprofil"
+    )
+    rebuild_col, profile_col = st.columns(2)
+    if rebuild_col.button(
+        "Bygg om till Hicore-format",
+        type="secondary",
+        disabled=not can_rebuild_uploaded_file,
+        key="rebuild_supplier_file_with_profile_button",
     ):
-        supplier_name = str(supplier_internal_name).strip()
+        try:
+            normalized_profile_options = _normalize_supplier_transform_profile_options(profile_options)
+            rebuilt_df = _build_supplier_hicore_renamed_copy(
+                df_supplier_uploaded,  # type: ignore[arg-type]
+                target_to_source=profile_mapping,
+                supplier_name=selected_supplier_name,
+                strip_leading_zeros_from_sku=normalized_profile_options[
+                    SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS
+                ],
+                ignore_rows_missing_sku=normalized_profile_options[
+                    SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU
+                ],
+            )
+            rebuilt_name = _rebuilt_supplier_file_name(selected_supplier_name)
+            st.session_state[FILE_STATE_KEYS["supplier"]] = {
+                "name": rebuilt_name,
+                "bytes": _df_excel_bytes(rebuilt_df, sheet_name="HiCore-format"),
+            }
+            st.session_state["supplier_compare_info_message"] = (
+                f'Leverant\u00f6rsfilen byggdes om med profilen f\u00f6r "{selected_supplier_name}" '
+                "och ersatte tidigare uppladdad fil."
+            )
+            _clear_all_run_state()
+            _rerun()
+        except Exception as exc:
+            st.session_state["supplier_ui_result"] = None
+            st.session_state["supplier_ui_error"] = f"Kunde inte bygga om leverant\u00f6rsfilen: {exc}"
+    if profile_col.button(
+        profile_action_label,
+        type="secondary",
+        disabled=not can_manage_profile,
+        key="update_supplier_profile_button",
+    ):
+        _request_supplier_profile_editor(selected_supplier_name)
+
+    if run_clicked:
         try:
             result = _compute_supplier_result(
                 hicore_bytes=hicore_file["bytes"],  # type: ignore[index]
-                supplier_name=supplier_name,
+                supplier_name=selected_supplier_name,
                 supplier_file_name=str(supplier_file["name"]),  # type: ignore[index]
                 supplier_bytes=supplier_file["bytes"],  # type: ignore[index]
                 excluded_brands=[str(name) for name in excluded_brands],
@@ -946,11 +1407,21 @@ def _render_supplier_compare_tab(
         _render_supplier_results(st.session_state["supplier_ui_result"])
 
 
-def _render_supplier_transform_tab(
+def _render_supplier_profile_editor(
     *,
     supplier_options: list[str],
     supplier_index_error: Optional[str],
 ) -> None:
+    normalized_transform_supplier = _normalize_selected_supplier_for_options(
+        st.session_state.get("supplier_internal_name"),
+        supplier_options,
+    )
+    if st.session_state.get("supplier_internal_name") != normalized_transform_supplier:
+        st.session_state["supplier_internal_name"] = normalized_transform_supplier
+    if st.session_state.get("supplier_transform_internal_name") != normalized_transform_supplier:
+        st.session_state["supplier_transform_internal_name"] = normalized_transform_supplier
+
+    st.subheader("Profilredigering")
     st.caption(
         "Matcha leverant\u00f6rens kolumner mot HiCore-kolumner och exportera en kopia med omd\u00f6pta kolumnnamn."
     )
@@ -965,9 +1436,6 @@ def _render_supplier_transform_tab(
         file_types=["csv", "xlsx", "xls", "xlsm"],
         uploader_key="supplier_transform_uploader",
     )
-    if supplier_file is None:
-        st.info("Ladda upp en leverant\u00f6rsfil f\u00f6r att mappa kolumner.")
-        return
 
     if supplier_index_error:
         st.warning(
@@ -994,20 +1462,105 @@ def _render_supplier_transform_tab(
         options=supplier_options,
         index=None,
         placeholder="V\u00e4lj leverant\u00f6r fr\u00e5n supplier_index...",
-        key="supplier_transform_internal_name",
+        key="supplier_internal_name",
     )
     selected_supplier_name = (
         str(supplier_internal_name).strip() if supplier_internal_name is not None else ""
+    )
+    if st.session_state.get("supplier_profiles_active_supplier") != (
+        selected_supplier_name if selected_supplier_name != "" else None
+    ):
+        st.session_state["supplier_profiles_active_supplier"] = (
+            selected_supplier_name if selected_supplier_name != "" else None
+        )
+    _sync_selected_supplier_between_views(
+        selected_supplier_name if selected_supplier_name != "" else None,
+        supplier_options,
+        target_key="supplier_transform_internal_name",
     )
     supplier_transform_profiles_raw = st.session_state.get("supplier_transform_profiles", {})
     supplier_transform_profiles = (
         supplier_transform_profiles_raw if isinstance(supplier_transform_profiles_raw, dict) else {}
     )
     saved_profile: dict[str, str] = {}
+    saved_profile_options = dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS)
     if selected_supplier_name:
         raw_profile = supplier_transform_profiles.get(selected_supplier_name, {})
         if isinstance(raw_profile, dict):
-            saved_profile = _normalize_supplier_transform_profile_mapping(raw_profile)
+            saved_profile, saved_profile_options = _normalize_supplier_transform_profile(raw_profile)
+    has_saved_profile = bool(saved_profile)
+
+    action_col_back, action_col_delete, _ = st.columns([1, 1, 3])
+    if action_col_back.button("Tillbaka", type="secondary", key="supplier_profile_back_button"):
+        st.session_state["supplier_profiles_mode"] = SUPPLIER_PROFILE_MODE_OVERVIEW
+        st.session_state["supplier_profiles_delete_confirm"] = False
+        st.session_state["supplier_profiles_active_supplier"] = None
+        _rerun()
+    if action_col_delete.button(
+        "Ta bort profil",
+        type="secondary",
+        disabled=not (selected_supplier_name != "" and has_saved_profile),
+        key="supplier_profile_delete_button",
+    ):
+        st.session_state["supplier_profiles_delete_confirm"] = True
+        _rerun()
+
+    if st.session_state.get("supplier_profiles_delete_confirm", False):
+        st.warning(f'Är du säker på att du vill ta bort profilen för "{selected_supplier_name}"?')
+        confirm_col, cancel_col = st.columns(2)
+        if confirm_col.button(
+            "Bekräfta radering",
+            type="primary",
+            key="supplier_profile_delete_confirm_button",
+        ):
+            delete_error = _delete_supplier_transform_profile(supplier_name=selected_supplier_name)
+            st.session_state["supplier_profiles_delete_confirm"] = False
+            if delete_error is not None:
+                st.error(delete_error)
+            else:
+                st.session_state["supplier_profiles_mode"] = SUPPLIER_PROFILE_MODE_OVERVIEW
+                st.session_state["supplier_profiles_active_supplier"] = None
+                _clear_supplier_state()
+                _rerun()
+        if cancel_col.button("Avbryt", key="supplier_profile_delete_cancel_button"):
+            st.session_state["supplier_profiles_delete_confirm"] = False
+            _rerun()
+
+    if selected_supplier_name != "":
+        st.markdown(f"**Profil: {selected_supplier_name}**")
+        st.markdown("**Nuvarande inställningar**")
+        if has_saved_profile:
+            saved_rows = [
+                {
+                    "HiCore-kolumn": target_column,
+                    "Leverantörskolumn": saved_profile.get(target_column, "(ej mappad)"),
+                }
+                for target_column in SUPPLIER_HICORE_RENAME_COLUMNS
+            ]
+            saved_rows.append(
+                {
+                    "HiCore-kolumn": SUPPLIER_HICORE_SUPPLIER_COLUMN,
+                    "Leverantörskolumn": f"Värde från supplier_index: {selected_supplier_name}",
+                }
+            )
+            st.dataframe(pd.DataFrame(saved_rows), use_container_width=True)
+            st.caption(
+                "SKU-regler: "
+                f"ta bort inledande nollor = {'Ja' if saved_profile_options[SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS] else 'Nej'}, "
+                f"ignorera rader utan SKU = {'Ja' if saved_profile_options[SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU] else 'Nej'}."
+            )
+        else:
+            st.info("Ingen profil är sparad ännu för vald leverantör.")
+
+    if supplier_file is None:
+        if selected_supplier_name == "":
+            st.info("V\u00e4lj leverant\u00f6r och ladda upp en leverant\u00f6rsfil f\u00f6r att mappa kolumner.")
+        else:
+            st.info(
+                "Ladda upp en leverant\u00f6rsfil f\u00f6r att mappa kolumner f\u00f6r vald leverant\u00f6r. "
+                "Uppladdning \u00e4r obligatorisk f\u00f6r att skapa eller uppdatera profil."
+            )
+        return
 
     supplier_file_name = str(supplier_file["name"])  # type: ignore[index]
     supplier_bytes = supplier_file["bytes"]  # type: ignore[index]
@@ -1036,7 +1589,7 @@ def _render_supplier_transform_tab(
     )
 
     if selected_supplier_name == "":
-        st.info("V\u00e4lj leverant\u00f6r f\u00f6r att kunna ladda eller spara en matchningsprofil.")
+        st.info("V\u00e4lj leverant\u00f6r f\u00f6r att kunna ladda eller spara en profil.")
     elif saved_profile:
         valid_saved_targets = [
             target
@@ -1050,7 +1603,7 @@ def _render_supplier_transform_tab(
         ]
         if valid_saved_targets:
             st.success(
-                f'Sparad matchningsprofil hittad för "{selected_supplier_name}". '
+                f'Sparad profil hittad för "{selected_supplier_name}". '
                 f"Förifyller {len(valid_saved_targets)} kolumnval."
             )
         if missing_saved_targets:
@@ -1061,7 +1614,7 @@ def _render_supplier_transform_tab(
             )
     elif selected_supplier_name:
         st.info(
-            f'Ingen sparad matchningsprofil finns för "{selected_supplier_name}". '
+            f'Ingen sparad profil finns för "{selected_supplier_name}". '
             "Matcha kolumnerna och spara en profil."
         )
 
@@ -1090,6 +1643,25 @@ def _render_supplier_transform_tab(
         if selected_source is not None and str(selected_source).strip() != "":
             target_to_source[target_column] = str(selected_source).strip()
 
+    st.subheader("SKU-regler")
+    st.caption(f'Gäller kolumnen "{SUPPLIER_HICORE_SKU_COLUMN}" när den är mappad.')
+    strip_zeros_key = f"supplier_transform_option_strip_zeros_{file_token}"
+    ignore_missing_sku_key = f"supplier_transform_option_ignore_missing_sku_{file_token}"
+    if strip_zeros_key not in st.session_state:
+        st.session_state[strip_zeros_key] = saved_profile_options[
+            SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS
+        ]
+    if ignore_missing_sku_key not in st.session_state:
+        st.session_state[ignore_missing_sku_key] = saved_profile_options[
+            SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU
+        ]
+    strip_leading_zeros_from_sku = bool(
+        st.checkbox("Ta bort inledande nollor i SKU", key=strip_zeros_key)
+    )
+    ignore_rows_missing_sku = bool(
+        st.checkbox("Ignorera rader som saknar SKU", key=ignore_missing_sku_key)
+    )
+
     selected_sources = [target_to_source[target] for target in target_to_source]
     duplicate_selected_sources = _find_duplicate_names(selected_sources)
     if duplicate_selected_sources:
@@ -1116,12 +1688,21 @@ def _render_supplier_transform_tab(
             "Omatchade HiCore-kolumner tas inte med i exportfilen: "
             + ", ".join(missing_target_columns)
         )
+    if (
+        SUPPLIER_HICORE_SKU_COLUMN not in target_to_source
+        and (strip_leading_zeros_from_sku or ignore_rows_missing_sku)
+    ):
+        st.info(
+            f'SKU-reglerna används först när "{SUPPLIER_HICORE_SKU_COLUMN}" är mappad.'
+        )
 
     try:
         renamed_df = _build_supplier_hicore_renamed_copy(
             df_supplier,
             target_to_source=target_to_source,
             supplier_name=selected_supplier_name,
+            strip_leading_zeros_from_sku=strip_leading_zeros_from_sku,
+            ignore_rows_missing_sku=ignore_rows_missing_sku,
         )
     except Exception as exc:
         st.error(str(exc))
@@ -1134,14 +1715,23 @@ def _render_supplier_transform_tab(
         for target_column in SUPPLIER_HICORE_RENAME_COLUMNS
         if target_column in target_to_source
     }
-    has_saved_complete_profile = saved_profile == current_profile_mapping
+    current_profile_options = _normalize_supplier_transform_profile_options(
+        {
+            SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS: strip_leading_zeros_from_sku,
+            SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU: ignore_rows_missing_sku,
+        }
+    )
+    has_saved_complete_profile = (
+        saved_profile == current_profile_mapping
+        and saved_profile_options == current_profile_options
+    )
     save_profile_label = (
-        "Uppdatera matchningsprofil"
+        "Uppdatera profil"
         if selected_supplier_name in supplier_transform_profiles
-        else "Spara matchningsprofil"
+        else "Spara profil"
     )
     if has_saved_complete_profile and selected_supplier_name != "":
-        st.caption("Aktuell kolumnmappning matchar den sparade profilen för leverantören.")
+        st.caption("Aktuell kolumnmappning och SKU-regler matchar den sparade profilen.")
 
     if st.button(
         save_profile_label,
@@ -1151,10 +1741,12 @@ def _render_supplier_transform_tab(
         profile_save_error = _persist_supplier_transform_profile(
             supplier_name=selected_supplier_name,
             target_to_source=current_profile_mapping,
+            options=current_profile_options,
         )
         if profile_save_error is None:
-            profile_save_success = f'Matchningsprofil sparad för "{selected_supplier_name}".'
+            profile_save_success = f'Profil sparad för "{selected_supplier_name}".'
             saved_profile = dict(current_profile_mapping)
+            saved_profile_options = dict(current_profile_options)
             supplier_transform_profiles = st.session_state.get("supplier_transform_profiles", {})
 
     if profile_save_error:
@@ -1182,6 +1774,11 @@ def _render_supplier_transform_tab(
         )
     else:
         st.success("Kolumnmappningen \u00e4r komplett. Exportfilen \u00e4r klar.")
+    st.caption(
+        "SKU-regler i exporten: "
+        f"ta bort inledande nollor = {'Ja' if strip_leading_zeros_from_sku else 'Nej'}, "
+        f"ignorera rader utan SKU = {'Ja' if ignore_rows_missing_sku else 'Nej'}."
+    )
     st.dataframe(pd.DataFrame(mapping_rows), use_container_width=True)
 
     preview_rows = min(len(renamed_df), 20)
@@ -1198,6 +1795,125 @@ def _render_supplier_transform_tab(
     )
 
 
+def _render_supplier_profiles_overview(*, supplier_options: list[str]) -> None:
+    st.subheader("Leverantörsprofiler")
+    st.caption("Profilerna är ett fristående bibliotek. Välj leverantör för att öppna eller skapa profil.")
+
+    search_query = st.text_input(
+        "Sök leverantör",
+        placeholder="Sök i båda listorna...",
+        key="supplier_profiles_search_query",
+    )
+    suppliers_with_profile, suppliers_without_profile = _split_suppliers_by_profile(supplier_options)
+    filtered_with_profile = _filter_supplier_names(suppliers_with_profile, search_query)
+    filtered_without_profile = _filter_supplier_names(suppliers_without_profile, search_query)
+
+    with_col, without_col = st.columns(2)
+
+    with with_col:
+        st.markdown(f"**Har profil ({len(filtered_with_profile)}/{len(suppliers_with_profile)})**")
+        selected_with_profile: Optional[str] = None
+        if filtered_with_profile:
+            st.caption("Välj leverantör med profil")
+            with st.container(height=320, border=True):
+                with_profile_event = st.dataframe(
+                    pd.DataFrame({"Leverantör": filtered_with_profile}),
+                    hide_index=True,
+                    use_container_width=True,
+                    height=300,
+                    key="supplier_profiles_with_profile_table",
+                    on_select="rerun",
+                    selection_mode="single-cell",
+                )
+            selected_idx = _selected_dataframe_row_index(with_profile_event)
+            if selected_idx is not None:
+                if 0 <= selected_idx < len(filtered_with_profile):
+                    selected_with_profile = filtered_with_profile[selected_idx]
+        else:
+            st.caption("Inga leverantörer matchar sökningen.")
+
+        if st.button(
+            "Öppna profil",
+            type="secondary",
+            disabled=selected_with_profile is None,
+            key="open_supplier_profile_from_overview_button",
+        ):
+            _request_supplier_profile_editor(str(selected_with_profile))
+
+    with without_col:
+        st.markdown(
+            f"**Saknar profil ({len(filtered_without_profile)}/{len(suppliers_without_profile)})**"
+        )
+        selected_without_profile: Optional[str] = None
+        if filtered_without_profile:
+            st.caption("Välj leverantör utan profil")
+            with st.container(height=320, border=True):
+                without_profile_event = st.dataframe(
+                    pd.DataFrame({"Leverantör": filtered_without_profile}),
+                    hide_index=True,
+                    use_container_width=True,
+                    height=300,
+                    key="supplier_profiles_without_profile_table",
+                    on_select="rerun",
+                    selection_mode="single-cell",
+                )
+            selected_idx = _selected_dataframe_row_index(without_profile_event)
+            if selected_idx is not None:
+                if 0 <= selected_idx < len(filtered_without_profile):
+                    selected_without_profile = filtered_without_profile[selected_idx]
+        else:
+            st.caption("Inga leverantörer matchar sökningen.")
+
+        if st.button(
+            "Skapa profil",
+            type="secondary",
+            disabled=selected_without_profile is None,
+            key="create_supplier_profile_from_overview_button",
+        ):
+            _request_supplier_profile_editor(str(selected_without_profile))
+
+
+def _render_supplier_transform_tab(
+    *,
+    supplier_options: list[str],
+    supplier_index_error: Optional[str],
+) -> None:
+    if not supplier_options:
+        st.warning(
+            f"Inga leverantörer hittades i {SUPPLIER_INDEX_PATH.name}. Lägg till leverantörer först."
+        )
+        return
+
+    profile_mode = st.session_state.get("supplier_profiles_mode", SUPPLIER_PROFILE_MODE_OVERVIEW)
+    if profile_mode not in (SUPPLIER_PROFILE_MODE_OVERVIEW, SUPPLIER_PROFILE_MODE_EDITOR):
+        profile_mode = SUPPLIER_PROFILE_MODE_OVERVIEW
+        st.session_state["supplier_profiles_mode"] = profile_mode
+
+    if profile_mode == SUPPLIER_PROFILE_MODE_EDITOR:
+        _render_supplier_profile_editor(
+            supplier_options=supplier_options,
+            supplier_index_error=supplier_index_error,
+        )
+        return
+
+    if supplier_index_error:
+        st.warning(
+            f"Kunde inte läsa {SUPPLIER_INDEX_PATH.name} vid uppstart: {supplier_index_error}"
+        )
+    if st.session_state.get("supplier_transform_profiles_load_error"):
+        st.warning(
+            "Kunde inte läsa "
+            f"{SUPPLIER_TRANSFORM_PROFILES_PATH.name} vid uppstart: "
+            f"{st.session_state['supplier_transform_profiles_load_error']}"
+        )
+    if st.session_state.get("supplier_transform_profiles_save_error"):
+        st.warning(
+            f"Kunde inte spara {SUPPLIER_TRANSFORM_PROFILES_PATH.name}: "
+            f"{st.session_state['supplier_transform_profiles_save_error']}"
+        )
+    _render_supplier_profiles_overview(supplier_options=supplier_options)
+
+
 def _render_supplier_page(
     *,
     supplier_options: list[str],
@@ -1206,20 +1922,81 @@ def _render_supplier_page(
     excluded_brands: list[str],
 ) -> None:
     st.header(MENU_SUPPLIER)
+    valid_views = (SUPPLIER_PAGE_VIEW_COMPARE, SUPPLIER_PAGE_VIEW_TRANSFORM)
 
-    compare_tab, transform_tab = st.tabs(["J\u00e4mf\u00f6relse", "Bygg om till HiCore-format"])
-    with compare_tab:
+    requested_view = st.session_state.get("supplier_page_view_request")
+    if requested_view in valid_views:
+        st.session_state["supplier_page_view"] = requested_view
+    st.session_state["supplier_page_view_request"] = None
+
+    requested_profile_mode = st.session_state.get("supplier_profiles_mode_request")
+    if requested_profile_mode in (SUPPLIER_PROFILE_MODE_OVERVIEW, SUPPLIER_PROFILE_MODE_EDITOR):
+        st.session_state["supplier_profiles_mode"] = requested_profile_mode
+    st.session_state["supplier_profiles_mode_request"] = None
+
+    requested_profile_supplier = _normalize_selected_supplier_for_options(
+        st.session_state.get("supplier_profiles_supplier_request"),
+        supplier_options,
+    )
+    if requested_profile_supplier is not None:
+        st.session_state["supplier_profiles_active_supplier"] = requested_profile_supplier
+        st.session_state["supplier_internal_name"] = requested_profile_supplier
+        st.session_state["supplier_transform_internal_name"] = requested_profile_supplier
+    st.session_state["supplier_profiles_supplier_request"] = None
+
+    if st.session_state.get("supplier_page_view") not in valid_views:
+        st.session_state["supplier_page_view"] = SUPPLIER_PAGE_VIEW_COMPARE
+
+    previous_rendered_view = st.session_state.get("supplier_page_view_last_rendered")
+    current_view = st.session_state.get("supplier_page_view")
+    if (
+        current_view == SUPPLIER_PAGE_VIEW_TRANSFORM
+        and previous_rendered_view != SUPPLIER_PAGE_VIEW_TRANSFORM
+        and requested_profile_mode != SUPPLIER_PROFILE_MODE_EDITOR
+    ):
+        st.session_state["supplier_profiles_mode"] = SUPPLIER_PROFILE_MODE_OVERVIEW
+
+    _sync_supplier_selection_session_state(supplier_options)
+
+    attention_required = bool(st.session_state.get("supplier_transform_attention_required", False))
+    if attention_required:
+        st.markdown(
+            """
+<style>
+@keyframes lc-transform-tab-blink {
+  0%, 100% { background-color: #fff3cd; border-color: #ffcc00; }
+  50% { background-color: #ffe08a; border-color: #ff9900; }
+}
+section.main div[data-testid="stRadio"] div[role="radiogroup"][aria-orientation="horizontal"] > label:nth-of-type(2) {
+  animation: lc-transform-tab-blink 1s infinite;
+  border: 1px solid #ffcc00;
+  border-radius: 0.5rem;
+}
+</style>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.warning("Saknad eller ofullständig profil. Gå till Leverantörsprofiler.")
+
+    selected_view = st.radio(
+        "Leverant\u00f6rsflik",
+        options=list(valid_views),
+        key="supplier_page_view",
+        horizontal=True,
+    )
+    if selected_view == SUPPLIER_PAGE_VIEW_COMPARE:
         _render_supplier_compare_tab(
             supplier_options=supplier_options,
             supplier_index_error=supplier_index_error,
             new_supplier_names=new_supplier_names,
             excluded_brands=excluded_brands,
         )
-    with transform_tab:
+    else:
         _render_supplier_transform_tab(
             supplier_options=supplier_options,
             supplier_index_error=supplier_index_error,
         )
+    st.session_state["supplier_page_view_last_rendered"] = selected_view
 
 
 def _render_settings_page(
