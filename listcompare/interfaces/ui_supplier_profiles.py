@@ -47,6 +47,11 @@ def _render_supplier_profile_editor(
         st.session_state.get("supplier_internal_name"),
         supplier_options,
     )
+    if normalized_transform_supplier is None:
+        normalized_transform_supplier = _normalize_selected_supplier_for_options(
+            st.session_state.get("supplier_profiles_active_supplier"),
+            supplier_options,
+        )
     if st.session_state.get("supplier_internal_name") != normalized_transform_supplier:
         st.session_state["supplier_internal_name"] = normalized_transform_supplier
     if st.session_state.get("supplier_transform_internal_name") != normalized_transform_supplier:
@@ -254,17 +259,24 @@ def _render_supplier_profile_editor(
     st.subheader("Matcha mot HiCore-kolumner")
     supplier_key_token = selected_supplier_name if selected_supplier_name != "" else "no_supplier"
     file_token = f"{Path(supplier_file_name).name}_{len(supplier_bytes)}_{supplier_key_token}"
+    seed_key = f"supplier_transform_seeded_defaults_{file_token}"
+    should_seed_defaults = not bool(st.session_state.get(seed_key, False))
     target_to_source: dict[str, str] = {}
 
     for idx, target_column in enumerate(SUPPLIER_HICORE_RENAME_COLUMNS):
         widget_key = f"supplier_transform_map_{idx}_{file_token}"
         saved_source = saved_profile.get(target_column)
-        if (
-            widget_key not in st.session_state
-            and saved_source is not None
-            and str(saved_source).strip() in source_columns
-        ):
-            st.session_state[widget_key] = str(saved_source).strip()
+        if saved_source is not None:
+            normalized_saved_source = str(saved_source).strip()
+            current_value = st.session_state.get(widget_key)
+            current_value_normalized = "" if current_value is None else str(current_value).strip()
+            if normalized_saved_source in source_columns and (
+                should_seed_defaults
+                or widget_key not in st.session_state
+                or current_value_normalized == ""
+                or current_value_normalized not in source_columns
+            ):
+                st.session_state[widget_key] = normalized_saved_source
 
         selected_source = st.selectbox(
             target_column,
@@ -280,14 +292,16 @@ def _render_supplier_profile_editor(
     st.caption(f'Gäller kolumnen "{SUPPLIER_HICORE_SKU_COLUMN}" när den är mappad.')
     strip_zeros_key = f"supplier_transform_option_strip_zeros_{file_token}"
     ignore_missing_sku_key = f"supplier_transform_option_ignore_missing_sku_{file_token}"
-    if strip_zeros_key not in st.session_state:
+    if should_seed_defaults or strip_zeros_key not in st.session_state:
         st.session_state[strip_zeros_key] = saved_profile_options[
             SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS
         ]
-    if ignore_missing_sku_key not in st.session_state:
+    if should_seed_defaults or ignore_missing_sku_key not in st.session_state:
         st.session_state[ignore_missing_sku_key] = saved_profile_options[
             SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU
         ]
+    if should_seed_defaults:
+        st.session_state[seed_key] = True
     strip_leading_zeros_from_sku = bool(
         st.checkbox("Ta bort inledande nollor i SKU", key=strip_zeros_key)
     )

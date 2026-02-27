@@ -184,12 +184,6 @@ def _render_supplier_compare_tab(
         and supplier_file_read_error is None
         and supplier_file_direct_compare_format
     )
-    run_clicked = st.button(
-        "K\u00f6r J\u00e4mf\u00f6relse",
-        type="primary",
-        disabled=not can_run,
-        key="run_supplier_button",
-    )
 
     can_rebuild_uploaded_file = (
         supplier_file is not None
@@ -246,6 +240,13 @@ def _render_supplier_compare_tab(
     ):
         _request_supplier_profile_editor(selected_supplier_name)
 
+    run_clicked = st.button(
+        "K\u00f6r J\u00e4mf\u00f6relse",
+        type="primary",
+        disabled=not can_run,
+        key="run_supplier_button",
+    )
+
     if run_clicked:
         try:
             result = _compute_supplier_result(
@@ -275,4 +276,3 @@ def _render_supplier_compare_tab(
         st.error(st.session_state["supplier_ui_error"])
     if st.session_state["supplier_ui_result"] is not None:
         _render_supplier_results(st.session_state["supplier_ui_result"])
-
