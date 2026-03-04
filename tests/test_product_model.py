@@ -1,6 +1,6 @@
 import unittest
 
-from listcompare.core.product_model import compute_hicore_stock, normalise_stock
+from listcompare.core.product_model import compute_hicore_stock, normalise_price, normalise_stock
 
 
 class ProductModelTests(unittest.TestCase):
@@ -16,6 +16,15 @@ class ProductModelTests(unittest.TestCase):
         self.assertEqual(compute_hicore_stock("12", "2"), "10")
         self.assertEqual(compute_hicore_stock("12,5", "0,5"), "12")
         self.assertEqual(compute_hicore_stock("", "1"), "")
+
+    def test_normalise_price_handles_currency_text_and_decimals(self) -> None:
+        self.assertEqual(normalise_price("100,00 SEK"), "100")
+        self.assertEqual(normalise_price("SEK 1 234,50"), "1234.5")
+        self.assertEqual(normalise_price("$1,234.50"), "1234.5")
+        self.assertEqual(normalise_price("1.234,00 kr"), "1234")
+
+    def test_normalise_price_keeps_non_numeric_values(self) -> None:
+        self.assertEqual(normalise_price("på förfrågan"), "på förfrågan")
 
 
 if __name__ == "__main__":

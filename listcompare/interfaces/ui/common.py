@@ -48,7 +48,16 @@ class CompareUiResult:
 
 @dataclass(frozen=True)
 class SupplierUiResult:
-    internal_only_df: pd.DataFrame
-    internal_only_csv_bytes: bytes
-    internal_only_count: int
+    outgoing_df: pd.DataFrame
+    new_products_df: pd.DataFrame
+    price_updates_out_of_stock_df: pd.DataFrame
+    price_updates_in_stock_df: pd.DataFrame
+    outgoing_excel_bytes: bytes
+    new_products_excel_bytes: bytes
+    price_updates_out_of_stock_excel_bytes: bytes
+    price_updates_in_stock_excel_bytes: bytes
+    outgoing_count: int
+    new_products_count: int
+    price_updates_out_of_stock_count: int
+    price_updates_in_stock_count: int
     warning_message: Optional[str]

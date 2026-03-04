@@ -5,7 +5,7 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-from ..core.supplier_products import find_supplier_id_column
+from ..core.supplier_products import find_supplier_id_column, find_supplier_price_column
 from .supplier_profile_utils import (
     SUPPLIER_HICORE_SKU_COLUMN,
     SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU,
@@ -23,7 +23,7 @@ from .ui.common import (
     SupplierUiResult,
 )
 from .ui.compute import _compute_supplier_result
-from .ui.data_io import _df_excel_bytes, _read_supplier_upload
+from .ui.data_io import _df_excel_bytes, _read_supplier_upload, _style_stock_mismatch_df
 from .ui.state import (
     _clear_all_run_state,
     _clear_supplier_state,
@@ -38,15 +38,66 @@ def _render_supplier_results(result: SupplierUiResult) -> None:
     if result.warning_message:
         st.warning(result.warning_message)
 
-    st.metric("Internal only (supplier)", result.internal_only_count)
-    st.download_button(
-        label="Ladda ner internal_only_skus.csv",
-        data=result.internal_only_csv_bytes,
-        file_name="internal_only_skus.csv",
-        mime="text/csv",
-        key="download_internal_only_csv",
+    metric_col_1, metric_col_2, metric_col_3, metric_col_4 = st.columns(4)
+    metric_col_1.metric("Utg\u00e5ende", result.outgoing_count)
+    metric_col_2.metric("Nyheter", result.new_products_count)
+    metric_col_3.metric("Prisuppdatering, Ej i lager", result.price_updates_out_of_stock_count)
+    metric_col_4.metric("Prisuppdatering, I lager", result.price_updates_in_stock_count)
+
+    tab_outgoing, tab_new, tab_price_oos, tab_price_in = st.tabs(
+        [
+            "Utg\u00e5ende",
+            "Nyheter",
+            "Prisuppdatering, Ej i lager",
+            "Prisuppdatering, I lager",
+        ]
     )
-    st.dataframe(result.internal_only_df, use_container_width=True)
+    with tab_outgoing:
+        st.download_button(
+            label="Ladda ner Utg\u00e5ende.xlsx",
+            data=result.outgoing_excel_bytes,
+            file_name="Utg\u00e5ende.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_supplier_outgoing_excel",
+        )
+        st.dataframe(result.outgoing_df, use_container_width=True)
+    with tab_new:
+        new_products_df = result.new_products_df
+        if "name" in new_products_df.columns and "Artikelnamn" not in new_products_df.columns:
+            new_products_df = new_products_df.rename(columns={"name": "Artikelnamn"})
+        st.download_button(
+            label="Ladda ner Nyheter.xlsx",
+            data=result.new_products_excel_bytes,
+            file_name="Nyheter.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_supplier_news_excel",
+        )
+        st.dataframe(new_products_df, use_container_width=True)
+    with tab_price_oos:
+        st.download_button(
+            label="Ladda ner Prisuppdatering, Ej i lager.xlsx",
+            data=result.price_updates_out_of_stock_excel_bytes,
+            file_name="Prisuppdatering, Ej i lager.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_supplier_price_oos_excel",
+        )
+        st.dataframe(
+            _style_stock_mismatch_df(result.price_updates_out_of_stock_df),
+            use_container_width=True,
+        )
+    with tab_price_in:
+        st.download_button(
+            label="Ladda ner Prisuppdatering, I lager.xlsx",
+            data=result.price_updates_in_stock_excel_bytes,
+            file_name="Prisuppdatering, I lager.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_supplier_price_in_excel",
+        )
+        st.dataframe(
+            _style_stock_mismatch_df(result.price_updates_in_stock_df),
+            use_container_width=True,
+        )
+
 
 
 
@@ -129,6 +180,7 @@ def _render_supplier_compare_tab(
             source_columns = [str(column).strip() for column in df_supplier_uploaded.columns]
             try:
                 find_supplier_id_column(df_supplier_uploaded)
+                find_supplier_price_column(df_supplier_uploaded)
                 supplier_file_direct_compare_format = True
             except Exception:
                 supplier_file_direct_compare_format = False
@@ -151,7 +203,7 @@ def _render_supplier_compare_tab(
     elif not profile_exists:
         st.error(
             f'Saknar sparad leverant\u00f6rsprofil f\u00f6r "{selected_supplier_name}". '
-            "Skapa en profil i fliken Leverantörsprofiler."
+            "Skapa en profil i fliken Leverant\u00f6rsprofiler."
         )
     elif not profile_has_required_sku:
         st.error(

@@ -2,6 +2,7 @@ import unittest
 
 from listcompare.core.comparison_use_cases import (
     build_comparison_results,
+    build_supplier_comparison_results,
     filter_product_map_by_excluded_normalized_skus,
     filter_products_by_supplier_with_sku,
     unique_sorted_skus_from_mismatch_side,
@@ -17,8 +18,16 @@ def make_product(
     supplier: str = "",
     name: str = "",
     stock: str = "",
+    price: str = "",
 ) -> Product:
-    return Product(sku=sku, name=name, stock=stock, supplier=supplier, source=source)
+    return Product(
+        sku=sku,
+        name=name,
+        stock=stock,
+        price=price,
+        supplier=supplier,
+        source=source,
+    )
 
 
 class ComparisonUseCaseTests(unittest.TestCase):
@@ -107,6 +116,46 @@ class ComparisonUseCaseTests(unittest.TestCase):
 
         self.assertEqual(unique_sorted_skus_from_product_map(sku_map), ["001", "002"])
         self.assertEqual(unique_sorted_skus_from_mismatch_side(mismatch_map, "magento"), ["02"])
+
+    def test_build_supplier_comparison_results_groups_price_updates_by_stock(self) -> None:
+        hicore_map = {
+            "1": [make_product(sku="1", source="hicore", supplier="EM Nordic", stock="0", price="100")],
+            "2": [make_product(sku="2", source="hicore", supplier="EM Nordic", stock="5", price="200")],
+            "3": [make_product(sku="3", source="hicore", supplier="EM Nordic", stock="1", price="300")],
+        }
+        supplier_map = {
+            "1": [make_product(sku="1", source="supplier", price="110")],
+            "2": [make_product(sku="2", source="supplier", price="210")],
+            "4": [make_product(sku="4", source="supplier", price="400")],
+        }
+
+        results = build_supplier_comparison_results(
+            hicore_map,
+            supplier_map,
+            supplier_internal_name="EM Nordic",
+        )
+
+        self.assertEqual(set(results.outgoing.keys()), {"3"})
+        self.assertEqual(set(results.new_products.keys()), {"4"})
+        self.assertEqual(set(results.price_updates_out_of_stock.keys()), {"1"})
+        self.assertEqual(set(results.price_updates_in_stock.keys()), {"2"})
+
+    def test_build_supplier_comparison_results_ignores_equivalent_price_formats(self) -> None:
+        hicore_map = {
+            "1": [make_product(sku="1", source="hicore", supplier="EM Nordic", stock="5", price="100")],
+        }
+        supplier_map = {
+            "1": [make_product(sku="1", source="supplier", price="100")],
+        }
+
+        results = build_supplier_comparison_results(
+            hicore_map,
+            supplier_map,
+            supplier_internal_name="EM Nordic",
+        )
+
+        self.assertEqual(results.price_updates_out_of_stock, {})
+        self.assertEqual(results.price_updates_in_stock, {})
 
 
 if __name__ == "__main__":
