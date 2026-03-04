@@ -7,11 +7,14 @@ from typing import Optional
 import streamlit as st
 
 from ..supplier_profile_utils import (
+    SUPPLIER_TRANSFORM_DEFAULT_FILTERS,
     SUPPLIER_TRANSFORM_DEFAULT_OPTIONS,
     load_supplier_transform_profiles as _load_supplier_transform_profiles,
-    normalize_supplier_transform_profile as _normalize_supplier_transform_profile,
+    normalize_supplier_transform_profile_details as _normalize_supplier_transform_profile_details,
+    normalize_supplier_transform_profile_filters as _normalize_supplier_transform_profile_filters,
     normalize_supplier_transform_profile_mapping as _normalize_supplier_transform_profile_mapping,
     normalize_supplier_transform_profile_options as _normalize_supplier_transform_profile_options,
+    ordered_supplier_transform_profile_composite_fields as _ordered_supplier_transform_profile_composite_fields,
     ordered_supplier_transform_profile_mapping as _ordered_supplier_transform_profile_mapping,
     save_supplier_transform_profiles as _save_supplier_transform_profiles,
 )
@@ -29,16 +32,40 @@ from .data_io import _normalize_supplier_names
 def _get_supplier_transform_profile(
     supplier_name: str,
 ) -> tuple[dict[str, str], dict[str, bool]]:
+    mapping, _composite_fields, _filters, options = _get_supplier_transform_profile_details(
+        supplier_name
+    )
+    return mapping, options
+
+
+def _get_supplier_transform_profile_details(
+    supplier_name: str,
+) -> tuple[dict[str, str], dict[str, list[str]], dict[str, object], dict[str, bool]]:
     normalized_supplier_name = str(supplier_name).strip()
     if normalized_supplier_name == "":
-        return {}, dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS)
+        return (
+            {},
+            {},
+            dict(SUPPLIER_TRANSFORM_DEFAULT_FILTERS),
+            dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS),
+        )
     raw_profiles = st.session_state.get("supplier_transform_profiles", {})
     if not isinstance(raw_profiles, dict):
-        return {}, dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS)
+        return (
+            {},
+            {},
+            dict(SUPPLIER_TRANSFORM_DEFAULT_FILTERS),
+            dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS),
+        )
     raw_profile = raw_profiles.get(normalized_supplier_name, {})
     if not isinstance(raw_profile, dict):
-        return {}, dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS)
-    return _normalize_supplier_transform_profile(raw_profile)
+        return (
+            {},
+            {},
+            dict(SUPPLIER_TRANSFORM_DEFAULT_FILTERS),
+            dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS),
+        )
+    return _normalize_supplier_transform_profile_details(raw_profile)
 
 
 def _normalize_selected_supplier_for_options(
@@ -196,6 +223,8 @@ def _persist_supplier_transform_profile(
     *,
     supplier_name: str,
     target_to_source: dict[str, str],
+    composite_fields: Optional[dict[str, list[str]]] = None,
+    filters: Optional[dict[str, object]] = None,
     options: dict[str, bool],
 ) -> Optional[str]:
     normalized_supplier_name = str(supplier_name).strip()
@@ -206,20 +235,43 @@ def _persist_supplier_transform_profile(
     for name, raw_profile in st.session_state.get("supplier_transform_profiles", {}).items():
         if not isinstance(name, str) or not isinstance(raw_profile, dict):
             continue
-        mapping, normalized_options = _normalize_supplier_transform_profile(raw_profile)
+        mapping, normalized_composite_fields, normalized_filters, normalized_options = (
+            _normalize_supplier_transform_profile_details(raw_profile)
+        )
         if not mapping:
             continue
-        profiles[name] = {
+        normalized_profile: dict[str, object] = {
             "target_to_source": _ordered_supplier_transform_profile_mapping(mapping),
             "options": normalized_options,
         }
+        if normalized_composite_fields:
+            normalized_profile["composite_fields"] = _ordered_supplier_transform_profile_composite_fields(
+                normalized_composite_fields
+            )
+        normalized_profile_filters = _normalize_supplier_transform_profile_filters(
+            normalized_filters
+        )
+        if normalized_profile_filters != dict(SUPPLIER_TRANSFORM_DEFAULT_FILTERS):
+            normalized_profile["filters"] = normalized_profile_filters
+        profiles[name] = normalized_profile
 
-    profiles[normalized_supplier_name] = {
+    profile_payload: dict[str, object] = {
         "target_to_source": _ordered_supplier_transform_profile_mapping(
             _normalize_supplier_transform_profile_mapping(target_to_source)
         ),
         "options": _normalize_supplier_transform_profile_options(options),
     }
+    normalized_composite_fields = _ordered_supplier_transform_profile_composite_fields(
+        composite_fields if isinstance(composite_fields, dict) else {}
+    )
+    if normalized_composite_fields:
+        profile_payload["composite_fields"] = normalized_composite_fields
+    normalized_filters = _normalize_supplier_transform_profile_filters(
+        filters if isinstance(filters, dict) else {}
+    )
+    if normalized_filters != dict(SUPPLIER_TRANSFORM_DEFAULT_FILTERS):
+        profile_payload["filters"] = normalized_filters
+    profiles[normalized_supplier_name] = profile_payload
 
     save_error = _save_supplier_transform_profiles(
         SUPPLIER_TRANSFORM_PROFILES_PATH,
@@ -243,13 +295,25 @@ def _delete_supplier_transform_profile(*, supplier_name: str) -> Optional[str]:
             continue
         if name.strip().casefold() == normalized_supplier_name.casefold():
             continue
-        mapping, normalized_options = _normalize_supplier_transform_profile(raw_profile)
+        mapping, normalized_composite_fields, normalized_filters, normalized_options = (
+            _normalize_supplier_transform_profile_details(raw_profile)
+        )
         if not mapping:
             continue
-        profiles[name] = {
+        normalized_profile: dict[str, object] = {
             "target_to_source": _ordered_supplier_transform_profile_mapping(mapping),
             "options": normalized_options,
         }
+        if normalized_composite_fields:
+            normalized_profile["composite_fields"] = _ordered_supplier_transform_profile_composite_fields(
+                normalized_composite_fields
+            )
+        normalized_profile_filters = _normalize_supplier_transform_profile_filters(
+            normalized_filters
+        )
+        if normalized_profile_filters != dict(SUPPLIER_TRANSFORM_DEFAULT_FILTERS):
+            normalized_profile["filters"] = normalized_profile_filters
+        profiles[name] = normalized_profile
 
     save_error = _save_supplier_transform_profiles(
         SUPPLIER_TRANSFORM_PROFILES_PATH,
@@ -326,5 +390,3 @@ def _render_file_input(
         _store_uploaded_file(kind, uploaded)
         _rerun()
     return None
-
-

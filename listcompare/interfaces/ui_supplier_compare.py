@@ -5,14 +5,16 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-from ..core.supplier_products import find_supplier_id_column, find_supplier_price_column
 from .supplier_profile_utils import (
     SUPPLIER_HICORE_SKU_COLUMN,
+    SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN,
+    SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES,
     SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU,
     SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS,
     build_supplier_hicore_renamed_copy as _build_supplier_hicore_renamed_copy,
     matches_profile_output_format as _matches_profile_output_format,
     missing_profile_source_columns as _missing_profile_source_columns,
+    normalize_supplier_transform_profile_filters as _normalize_supplier_transform_profile_filters,
     normalize_supplier_transform_profile_options as _normalize_supplier_transform_profile_options,
     profile_has_required_sku_mapping as _profile_has_required_sku_mapping,
     rebuilt_supplier_file_name as _rebuilt_supplier_file_name,
@@ -27,7 +29,7 @@ from .ui.data_io import _df_excel_bytes, _read_supplier_upload, _style_stock_mis
 from .ui.state import (
     _clear_all_run_state,
     _clear_supplier_state,
-    _get_supplier_transform_profile,
+    _get_supplier_transform_profile_details,
     _normalize_selected_supplier_for_options,
     _render_file_input,
     _request_supplier_profile_editor,
@@ -158,7 +160,9 @@ def _render_supplier_compare_tab(
         target_key="supplier_transform_internal_name",
     )
 
-    profile_mapping, profile_options = _get_supplier_transform_profile(selected_supplier_name)
+    profile_mapping, profile_composite_fields, profile_filters, profile_options = (
+        _get_supplier_transform_profile_details(selected_supplier_name)
+    )
     profile_exists = bool(profile_mapping)
     profile_has_required_sku = _profile_has_required_sku_mapping(profile_mapping)
     profile_ready = profile_exists and profile_has_required_sku
@@ -167,7 +171,6 @@ def _render_supplier_compare_tab(
     )
 
     supplier_file_read_error: Optional[str] = None
-    supplier_file_direct_compare_format = False
     profile_matches_uploaded_file = False
     file_matches_profile_output_format = False
     missing_profile_columns_for_file: list[str] = []
@@ -178,22 +181,18 @@ def _render_supplier_compare_tab(
         try:
             df_supplier_uploaded = _read_supplier_upload(supplier_file_name, supplier_bytes)
             source_columns = [str(column).strip() for column in df_supplier_uploaded.columns]
-            try:
-                find_supplier_id_column(df_supplier_uploaded)
-                find_supplier_price_column(df_supplier_uploaded)
-                supplier_file_direct_compare_format = True
-            except Exception:
-                supplier_file_direct_compare_format = False
-
             if profile_ready:
                 missing_profile_columns_for_file = _missing_profile_source_columns(
                     profile_mapping,
                     source_columns,
+                    composite_fields=profile_composite_fields,
+                    filters=profile_filters,
                 )
                 profile_matches_uploaded_file = len(missing_profile_columns_for_file) == 0
                 file_matches_profile_output_format = _matches_profile_output_format(
                     profile_mapping,
                     source_columns,
+                    composite_fields=profile_composite_fields,
                 )
         except Exception as exc:
             supplier_file_read_error = str(exc)
@@ -220,7 +219,7 @@ def _render_supplier_compare_tab(
             st.success("Uppladdad leverant\u00f6rsfil matchar redan sparad profil i HiCore-format.")
         elif profile_ready and profile_matches_uploaded_file:
             st.info(
-                "Leverant\u00f6rsfilen kan byggas om via profil. Tryck p\u00e5 \"Bygg om till Hicore-format\"."
+                "Leverant\u00f6rsfilen kan byggas om via profil och samma transform anv\u00e4nds i j\u00e4mf\u00f6relsen."
             )
         elif profile_ready:
             st.warning(
@@ -234,7 +233,7 @@ def _render_supplier_compare_tab(
         and selected_supplier_name != ""
         and profile_ready
         and supplier_file_read_error is None
-        and supplier_file_direct_compare_format
+        and (file_matches_profile_output_format or profile_matches_uploaded_file)
     )
 
     can_rebuild_uploaded_file = (
@@ -259,10 +258,21 @@ def _render_supplier_compare_tab(
     ):
         try:
             normalized_profile_options = _normalize_supplier_transform_profile_options(profile_options)
+            normalized_profile_filters = _normalize_supplier_transform_profile_filters(profile_filters)
             rebuilt_df = _build_supplier_hicore_renamed_copy(
                 df_supplier_uploaded,  # type: ignore[arg-type]
                 target_to_source=profile_mapping,
                 supplier_name=selected_supplier_name,
+                composite_fields=profile_composite_fields,
+                brand_source_column=str(
+                    normalized_profile_filters[SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN]
+                ),
+                excluded_brand_values=[
+                    str(value)
+                    for value in normalized_profile_filters[
+                        SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES
+                    ]
+                ],
                 strip_leading_zeros_from_sku=normalized_profile_options[
                     SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS
                 ],
@@ -307,6 +317,10 @@ def _render_supplier_compare_tab(
                 supplier_file_name=str(supplier_file["name"]),  # type: ignore[index]
                 supplier_bytes=supplier_file["bytes"],  # type: ignore[index]
                 excluded_brands=[str(name) for name in excluded_brands],
+                profile_mapping=profile_mapping,
+                profile_composite_fields=profile_composite_fields,
+                profile_filters=profile_filters,
+                profile_options=profile_options,
             )
             st.session_state["supplier_ui_result"] = result
             st.session_state["supplier_ui_error"] = None

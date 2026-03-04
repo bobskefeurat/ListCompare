@@ -49,6 +49,7 @@ from .ui.state import (
     _delete_supplier_transform_profile,
     _get_stored_file,
     _get_supplier_transform_profile,
+    _get_supplier_transform_profile_details,
     _init_session_state,
     _load_ui_settings,
     _normalize_selected_supplier_for_options,

@@ -7,15 +7,20 @@ import pandas as pd
 import streamlit as st
 
 from .supplier_profile_utils import (
+    SUPPLIER_HICORE_NAME_COLUMN,
     SUPPLIER_HICORE_RENAME_COLUMNS,
     SUPPLIER_HICORE_SKU_COLUMN,
     SUPPLIER_HICORE_SUPPLIER_COLUMN,
+    SUPPLIER_TRANSFORM_DEFAULT_FILTERS,
     SUPPLIER_TRANSFORM_DEFAULT_OPTIONS,
+    SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN,
+    SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES,
     SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU,
     SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS,
     build_supplier_hicore_renamed_copy as _build_supplier_hicore_renamed_copy,
     filter_supplier_names as _filter_supplier_names,
-    normalize_supplier_transform_profile as _normalize_supplier_transform_profile,
+    normalize_supplier_transform_profile_details as _normalize_supplier_transform_profile_details,
+    normalize_supplier_transform_profile_filters as _normalize_supplier_transform_profile_filters,
     normalize_supplier_transform_profile_options as _normalize_supplier_transform_profile_options,
     selected_dataframe_row_index as _selected_dataframe_row_index,
     find_duplicate_names as _find_duplicate_names,
@@ -38,6 +43,39 @@ from .ui.state import (
     _split_suppliers_by_profile,
     _sync_selected_supplier_between_views,
 )
+
+_NAME_MODE_SINGLE = "single"
+_NAME_MODE_COMPOSITE = "composite"
+
+
+def _supplier_profile_summary_value(
+    target_column: str,
+    *,
+    profile_mapping: dict[str, str],
+    profile_composite_fields: dict[str, list[str]],
+) -> str:
+    if target_column in profile_composite_fields:
+        return " + ".join(profile_composite_fields[target_column])
+    return profile_mapping.get(target_column, "(ej mappad)")
+
+
+def _supplier_file_unique_values(df_supplier: pd.DataFrame, *, column_name: str) -> list[str]:
+    if column_name not in df_supplier.columns:
+        return []
+
+    unique_by_folded: dict[str, str] = {}
+    for raw_value in df_supplier[column_name].tolist():
+        if pd.isna(raw_value):
+            continue
+        value = str(raw_value).strip()
+        if value == "" or value.casefold() == "nan":
+            continue
+        folded = value.casefold()
+        if folded not in unique_by_folded:
+            unique_by_folded[folded] = value
+    return sorted(unique_by_folded.values(), key=lambda item: item.casefold())
+
+
 def _render_supplier_profile_editor(
     *,
     supplier_options: list[str],
@@ -119,11 +157,18 @@ def _render_supplier_profile_editor(
         supplier_transform_profiles_raw if isinstance(supplier_transform_profiles_raw, dict) else {}
     )
     saved_profile: dict[str, str] = {}
+    saved_composite_fields: dict[str, list[str]] = {}
+    saved_filters = dict(SUPPLIER_TRANSFORM_DEFAULT_FILTERS)
     saved_profile_options = dict(SUPPLIER_TRANSFORM_DEFAULT_OPTIONS)
     if selected_supplier_name:
         raw_profile = supplier_transform_profiles.get(selected_supplier_name, {})
         if isinstance(raw_profile, dict):
-            saved_profile, saved_profile_options = _normalize_supplier_transform_profile(raw_profile)
+            (
+                saved_profile,
+                saved_composite_fields,
+                saved_filters,
+                saved_profile_options,
+            ) = _normalize_supplier_transform_profile_details(raw_profile)
     has_saved_profile = bool(saved_profile)
 
     action_col_back, action_col_delete, _ = st.columns([1, 1, 3])
@@ -171,7 +216,11 @@ def _render_supplier_profile_editor(
             saved_rows = [
                 {
                     "HiCore-kolumn": target_column,
-                    "Leverantörskolumn": saved_profile.get(target_column, "(ej mappad)"),
+                    "Leverantörskolumn": _supplier_profile_summary_value(
+                        target_column,
+                        profile_mapping=saved_profile,
+                        profile_composite_fields=saved_composite_fields,
+                    ),
                 }
                 for target_column in SUPPLIER_HICORE_RENAME_COLUMNS
             ]
@@ -187,6 +236,22 @@ def _render_supplier_profile_editor(
                 f"ta bort inledande nollor = {'Ja' if saved_profile_options[SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS] else 'Nej'}, "
                 f"ignorera rader utan SKU = {'Ja' if saved_profile_options[SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU] else 'Nej'}."
             )
+            saved_brand_source = str(
+                saved_filters.get(SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN, "")
+            ).strip()
+            saved_excluded_brands = [
+                str(value)
+                for value in saved_filters.get(
+                    SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES,
+                    [],
+                )
+            ]
+            if saved_brand_source != "" or saved_excluded_brands:
+                st.caption(
+                    "Varumärkesfilter: "
+                    f"brand-kolumn = {saved_brand_source or '(ingen vald)'}, "
+                    f"exkluderade värden = {', '.join(saved_excluded_brands) if saved_excluded_brands else '(inga)'}."
+                )
         else:
             st.info("Ingen profil är sparad ännu för vald leverantör.")
 
@@ -234,22 +299,69 @@ def _render_supplier_profile_editor(
             for target, source in saved_profile.items()
             if target in SUPPLIER_HICORE_RENAME_COLUMNS and source in source_columns
         ]
+        valid_saved_targets.extend(
+            [
+                target
+                for target, source_list in saved_composite_fields.items()
+                if target in SUPPLIER_HICORE_RENAME_COLUMNS
+                and all(source in source_columns for source in source_list)
+            ]
+        )
         missing_saved_targets = [
             target
             for target, source in saved_profile.items()
             if target in SUPPLIER_HICORE_RENAME_COLUMNS and source not in source_columns
         ]
+        missing_saved_targets.extend(
+            [
+                target
+                for target, source_list in saved_composite_fields.items()
+                if target in SUPPLIER_HICORE_RENAME_COLUMNS
+                and any(source not in source_columns for source in source_list)
+            ]
+        )
+        saved_brand_source = str(
+            saved_filters.get(SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN, "")
+        ).strip()
+        saved_excluded_brands = [
+            str(value)
+            for value in saved_filters.get(
+                SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES,
+                [],
+            )
+        ]
         if valid_saved_targets:
             st.success(
                 f'Sparad profil hittad för "{selected_supplier_name}". '
-                f"Förifyller {len(valid_saved_targets)} kolumnval."
+                f"Förifyller {len(set(valid_saved_targets))} kolumnval."
             )
         if missing_saved_targets:
             st.warning(
                 "Den sparade profilen matchar inte fullt ut mot aktuell fil. "
                 "Välj om följande HiCore-kolumner: "
-                + ", ".join(missing_saved_targets)
+                + ", ".join(sorted(set(missing_saved_targets), key=lambda item: item.casefold()))
             )
+        if saved_brand_source != "" and saved_brand_source not in source_columns:
+            st.warning(
+                "Den sparade profilens brand-kolumn finns inte i aktuell fil: "
+                + saved_brand_source
+            )
+        elif saved_excluded_brands and saved_brand_source != "":
+            current_brand_values = _supplier_file_unique_values(
+                df_supplier,
+                column_name=saved_brand_source,
+            )
+            current_brand_values_folded = {value.casefold() for value in current_brand_values}
+            missing_saved_excluded = [
+                brand_name
+                for brand_name in saved_excluded_brands
+                if brand_name.casefold() not in current_brand_values_folded
+            ]
+            if missing_saved_excluded:
+                st.warning(
+                    "Den sparade profilen innehåller exkluderade varumärken som inte finns i aktuell fil: "
+                    + ", ".join(missing_saved_excluded)
+                )
     elif selected_supplier_name:
         st.info(
             f'Ingen sparad profil finns för "{selected_supplier_name}". '
@@ -262,9 +374,101 @@ def _render_supplier_profile_editor(
     seed_key = f"supplier_transform_seeded_defaults_{file_token}"
     should_seed_defaults = not bool(st.session_state.get(seed_key, False))
     target_to_source: dict[str, str] = {}
+    name_mode_key = f"supplier_transform_name_mode_{file_token}"
+    if should_seed_defaults or name_mode_key not in st.session_state:
+        st.session_state[name_mode_key] = (
+            _NAME_MODE_COMPOSITE
+            if saved_composite_fields.get(SUPPLIER_HICORE_NAME_COLUMN)
+            else _NAME_MODE_SINGLE
+        )
 
-    for idx, target_column in enumerate(SUPPLIER_HICORE_RENAME_COLUMNS):
-        widget_key = f"supplier_transform_map_{idx}_{file_token}"
+    st.markdown(f"**{SUPPLIER_HICORE_NAME_COLUMN}**")
+    current_name_mode = str(st.session_state.get(name_mode_key, _NAME_MODE_SINGLE))
+    if current_name_mode not in (_NAME_MODE_SINGLE, _NAME_MODE_COMPOSITE):
+        current_name_mode = _NAME_MODE_SINGLE
+        st.session_state[name_mode_key] = current_name_mode
+    current_name_mode = st.radio(
+        "Namnläge",
+        options=[_NAME_MODE_SINGLE, _NAME_MODE_COMPOSITE],
+        format_func=lambda value: "En kolumn" if value == _NAME_MODE_SINGLE else "Kombinera kolumner",
+        horizontal=True,
+        key=name_mode_key,
+    )
+
+    composite_name_sources: list[str] = []
+    if current_name_mode == _NAME_MODE_SINGLE:
+        name_widget_key = f"supplier_transform_map_{SUPPLIER_HICORE_NAME_COLUMN}_{file_token}"
+        saved_name_source = saved_profile.get(SUPPLIER_HICORE_NAME_COLUMN)
+        if saved_name_source is not None:
+            normalized_saved_source = str(saved_name_source).strip()
+            current_value = st.session_state.get(name_widget_key)
+            current_value_normalized = "" if current_value is None else str(current_value).strip()
+            if normalized_saved_source in source_columns and (
+                should_seed_defaults
+                or name_widget_key not in st.session_state
+                or current_value_normalized == ""
+                or current_value_normalized not in source_columns
+            ):
+                st.session_state[name_widget_key] = normalized_saved_source
+
+        selected_name_source = st.selectbox(
+            SUPPLIER_HICORE_NAME_COLUMN,
+            options=source_columns,
+            index=None,
+            placeholder="Välj motsvarande kolumn i leverantörsfilen...",
+            key=name_widget_key,
+        )
+        if selected_name_source is not None and str(selected_name_source).strip() != "":
+            target_to_source[SUPPLIER_HICORE_NAME_COLUMN] = str(selected_name_source).strip()
+    else:
+        saved_name_parts = saved_composite_fields.get(SUPPLIER_HICORE_NAME_COLUMN, [])
+        name_part_count_key = f"supplier_transform_name_part_count_{file_token}"
+        if should_seed_defaults or name_part_count_key not in st.session_state:
+            st.session_state[name_part_count_key] = max(
+                2,
+                len(saved_name_parts) if saved_name_parts else 2,
+            )
+        max_name_parts = max(2, len(source_columns))
+        requested_name_parts = int(
+            st.number_input(
+                "Antal kolumner i Artikelnamn",
+                min_value=2,
+                max_value=max_name_parts,
+                step=1,
+                key=name_part_count_key,
+            )
+        )
+        for idx in range(requested_name_parts):
+            widget_key = f"supplier_transform_name_part_{idx}_{file_token}"
+            if idx < len(saved_name_parts):
+                normalized_saved_source = str(saved_name_parts[idx]).strip()
+                current_value = st.session_state.get(widget_key)
+                current_value_normalized = "" if current_value is None else str(current_value).strip()
+                if normalized_saved_source in source_columns and (
+                    should_seed_defaults
+                    or widget_key not in st.session_state
+                    or current_value_normalized == ""
+                    or current_value_normalized not in source_columns
+                ):
+                    st.session_state[widget_key] = normalized_saved_source
+
+            selected_name_part = st.selectbox(
+                f"Artikelnamn del {idx + 1}",
+                options=source_columns,
+                index=None,
+                placeholder="Välj kolumn...",
+                key=widget_key,
+            )
+            if selected_name_part is not None and str(selected_name_part).strip() != "":
+                composite_name_sources.append(str(selected_name_part).strip())
+
+    other_target_columns = [
+        target_column
+        for target_column in SUPPLIER_HICORE_RENAME_COLUMNS
+        if target_column != SUPPLIER_HICORE_NAME_COLUMN
+    ]
+    for target_column in other_target_columns:
+        widget_key = f"supplier_transform_map_{target_column}_{file_token}"
         saved_source = saved_profile.get(target_column)
         if saved_source is not None:
             normalized_saved_source = str(saved_source).strip()
@@ -282,11 +486,15 @@ def _render_supplier_profile_editor(
             target_column,
             options=source_columns,
             index=None,
-            placeholder="V\u00e4lj motsvarande kolumn i leverant\u00f6rsfilen...",
+            placeholder="Välj motsvarande kolumn i leverantörsfilen...",
             key=widget_key,
         )
         if selected_source is not None and str(selected_source).strip() != "":
             target_to_source[target_column] = str(selected_source).strip()
+
+    composite_fields: dict[str, list[str]] = {}
+    if current_name_mode == _NAME_MODE_COMPOSITE:
+        composite_fields[SUPPLIER_HICORE_NAME_COLUMN] = composite_name_sources
 
     st.subheader("SKU-regler")
     st.caption(f'Gäller kolumnen "{SUPPLIER_HICORE_SKU_COLUMN}" när den är mappad.')
@@ -309,26 +517,97 @@ def _render_supplier_profile_editor(
         st.checkbox("Ignorera rader som saknar SKU", key=ignore_missing_sku_key)
     )
 
-    selected_sources = [target_to_source[target] for target in target_to_source]
-    duplicate_selected_sources = _find_duplicate_names(selected_sources)
-    if duplicate_selected_sources:
+    st.subheader("Varumärkesfilter")
+    brand_source_key = f"supplier_transform_brand_source_{file_token}"
+    saved_brand_source = str(saved_filters.get(SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN, "")).strip()
+    if should_seed_defaults and saved_brand_source in source_columns:
+        st.session_state[brand_source_key] = saved_brand_source
+    elif should_seed_defaults and brand_source_key not in st.session_state:
+        st.session_state[brand_source_key] = None
+
+    selected_brand_source = st.selectbox(
+        "Brand-kolumn för exkludering",
+        options=source_columns,
+        index=None,
+        placeholder="Välj brand-kolumn i leverantörsfilen...",
+        key=brand_source_key,
+    )
+    selected_brand_source_name = (
+        str(selected_brand_source).strip() if selected_brand_source is not None else ""
+    )
+    available_brand_values = (
+        _supplier_file_unique_values(df_supplier, column_name=selected_brand_source_name)
+        if selected_brand_source_name != ""
+        else []
+    )
+    saved_excluded_brand_values = [
+        str(value)
+        for value in saved_filters.get(
+            SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES,
+            [],
+        )
+    ]
+    missing_saved_excluded_brand_values = [
+        brand_name
+        for brand_name in saved_excluded_brand_values
+        if brand_name.casefold() not in {value.casefold() for value in available_brand_values}
+    ]
+    brand_value_options = list(available_brand_values)
+    for brand_name in missing_saved_excluded_brand_values:
+        brand_value_options.append(brand_name)
+
+    excluded_brand_values_key = f"supplier_transform_excluded_brands_{file_token}"
+    if should_seed_defaults or excluded_brand_values_key not in st.session_state:
+        st.session_state[excluded_brand_values_key] = saved_excluded_brand_values
+    if missing_saved_excluded_brand_values:
+        st.warning(
+            "Sparade exkluderade varum\u00e4rken saknas i aktuell fil men beh\u00e5lls tills du \u00e4ndrar profilen: "
+            + ", ".join(missing_saved_excluded_brand_values)
+        )
+    selected_excluded_brand_values = st.multiselect(
+        "Varum\u00e4rkesv\u00e4rden som ska exkluderas",
+        options=brand_value_options,
+        placeholder="V\u00e4lj ett eller flera v\u00e4rden...",
+        disabled=selected_brand_source_name == "",
+        key=excluded_brand_values_key,
+    )
+    current_profile_filters = _normalize_supplier_transform_profile_filters(
+        {
+            SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN: selected_brand_source_name,
+            SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES: selected_excluded_brand_values,
+        }
+    )
+
+    duplicate_name_sources = _find_duplicate_names(composite_name_sources)
+    if duplicate_name_sources:
         st.error(
-            "Du har valt samma leverant\u00f6rskolumn flera g\u00e5nger: "
-            + ", ".join(duplicate_selected_sources)
+            "Samma kolumn kan inte anv\u00e4ndas flera g\u00e5nger i det sammansatta artikelnamnet: "
+            + ", ".join(duplicate_name_sources)
         )
 
     missing_target_columns = [
-        column for column in SUPPLIER_HICORE_RENAME_COLUMNS if column not in target_to_source
+        column
+        for column in SUPPLIER_HICORE_RENAME_COLUMNS
+        if column not in target_to_source and column not in composite_fields
     ]
-    if duplicate_selected_sources:
+    if duplicate_name_sources:
         return
     if selected_supplier_name == "":
         st.info(
             f'V\u00e4lj "{SUPPLIER_HICORE_SUPPLIER_COLUMN}" fr\u00e5n leverant\u00f6rslistan f\u00f6r att skapa exportfilen.'
         )
         return
-    if not target_to_source:
+    if not target_to_source and not composite_fields:
         st.info("Matcha minst en HiCore-kolumn f\u00f6r att skapa exportfilen.")
+        return
+    if current_name_mode == _NAME_MODE_COMPOSITE and len(composite_name_sources) < 2:
+        st.info("V\u00e4lj minst tv\u00e5 kolumner f\u00f6r att bygga ett sammansatt artikelnamn.")
+        return
+    if (
+        current_profile_filters[SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES]
+        and str(current_profile_filters[SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN]).strip() == ""
+    ):
+        st.info("V\u00e4lj en brand-kolumn innan du exkluderar varum\u00e4rkesv\u00e4rden.")
         return
     if missing_target_columns:
         st.info(
@@ -348,6 +627,16 @@ def _render_supplier_profile_editor(
             df_supplier,
             target_to_source=target_to_source,
             supplier_name=selected_supplier_name,
+            composite_fields=composite_fields,
+            brand_source_column=str(
+                current_profile_filters[SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN]
+            ),
+            excluded_brand_values=[
+                str(value)
+                for value in current_profile_filters[
+                    SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES
+                ]
+            ],
             strip_leading_zeros_from_sku=strip_leading_zeros_from_sku,
             ignore_rows_missing_sku=ignore_rows_missing_sku,
         )
@@ -362,6 +651,11 @@ def _render_supplier_profile_editor(
         for target_column in SUPPLIER_HICORE_RENAME_COLUMNS
         if target_column in target_to_source
     }
+    current_profile_composite_fields = {
+        target_column: list(source_columns_for_target)
+        for target_column, source_columns_for_target in composite_fields.items()
+        if source_columns_for_target
+    }
     current_profile_options = _normalize_supplier_transform_profile_options(
         {
             SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS: strip_leading_zeros_from_sku,
@@ -370,6 +664,8 @@ def _render_supplier_profile_editor(
     )
     has_saved_complete_profile = (
         saved_profile == current_profile_mapping
+        and saved_composite_fields == current_profile_composite_fields
+        and saved_filters == current_profile_filters
         and saved_profile_options == current_profile_options
     )
     save_profile_label = (
@@ -378,7 +674,7 @@ def _render_supplier_profile_editor(
         else "Spara profil"
     )
     if has_saved_complete_profile and selected_supplier_name != "":
-        st.caption("Aktuell kolumnmappning och SKU-regler matchar den sparade profilen.")
+        st.caption("Aktuell kolumnmappning, namnregler, filter och SKU-regler matchar den sparade profilen.")
 
     if st.button(
         save_profile_label,
@@ -388,11 +684,18 @@ def _render_supplier_profile_editor(
         profile_save_error = _persist_supplier_transform_profile(
             supplier_name=selected_supplier_name,
             target_to_source=current_profile_mapping,
+            composite_fields=current_profile_composite_fields,
+            filters=current_profile_filters,
             options=current_profile_options,
         )
         if profile_save_error is None:
             profile_save_success = f'Profil sparad för "{selected_supplier_name}".'
             saved_profile = dict(current_profile_mapping)
+            saved_composite_fields = {
+                target: list(source_columns_for_target)
+                for target, source_columns_for_target in current_profile_composite_fields.items()
+            }
+            saved_filters = dict(current_profile_filters)
             saved_profile_options = dict(current_profile_options)
             supplier_transform_profiles = st.session_state.get("supplier_transform_profiles", {})
 
@@ -404,10 +707,14 @@ def _render_supplier_profile_editor(
     mapping_rows = [
         {
             "HiCore-kolumn": target_column,
-            "Leverant\u00f6rskolumn": target_to_source[target_column],
+            "Leverant\u00f6rskolumn": _supplier_profile_summary_value(
+                target_column,
+                profile_mapping=current_profile_mapping,
+                profile_composite_fields=current_profile_composite_fields,
+            ),
         }
         for target_column in SUPPLIER_HICORE_RENAME_COLUMNS
-        if target_column in target_to_source
+        if target_column in current_profile_mapping or target_column in current_profile_composite_fields
     ]
     mapping_rows.append(
         {
@@ -425,6 +732,24 @@ def _render_supplier_profile_editor(
         "SKU-regler i exporten: "
         f"ta bort inledande nollor = {'Ja' if strip_leading_zeros_from_sku else 'Nej'}, "
         f"ignorera rader utan SKU = {'Ja' if ignore_rows_missing_sku else 'Nej'}."
+    )
+    st.caption(
+        "Varumärkesfilter i exporten: "
+        f"brand-kolumn = {str(current_profile_filters[SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN]).strip() or '(ingen vald)'}, "
+        f"exkluderade värden = "
+        + (
+            ", ".join(
+                [
+                    str(value)
+                    for value in current_profile_filters[
+                        SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES
+                    ]
+                ]
+            )
+            if current_profile_filters[SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES]
+            else "(inga)"
+        )
+        + "."
     )
     st.dataframe(pd.DataFrame(mapping_rows), use_container_width=True)
 

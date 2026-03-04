@@ -125,6 +125,89 @@ class SupplierUiExportTests(unittest.TestCase):
         self.assertEqual(in_stock_export[sku_col].tolist(), ["200"])
         self.assertEqual(in_stock_export[price_col].tolist(), ["21"])
 
+    def test_supplier_compare_applies_profile_transform_and_brand_filter(self) -> None:
+        sku_col = HICORE_COLUMNS["sku"]
+        name_col = HICORE_COLUMNS["name"]
+        supplier_col = HICORE_COLUMNS["supplier"]
+        total_col = HICORE_COLUMNS["total_stock"]
+        reserved_col = HICORE_COLUMNS["reserved"]
+        price_col = HICORE_COLUMNS["price"]
+
+        df_hicore = pd.DataFrame(
+            [
+                {
+                    sku_col: "100",
+                    name_col: "SKU 100",
+                    total_col: "0",
+                    reserved_col: "0",
+                    price_col: "10",
+                    supplier_col: "EM Nordic",
+                },
+                {
+                    sku_col: "200",
+                    name_col: "SKU 200",
+                    total_col: "1",
+                    reserved_col: "0",
+                    price_col: "20",
+                    supplier_col: "EM Nordic",
+                },
+            ]
+        )
+        hicore_bytes = _to_csv_bytes(df_hicore)
+
+        df_supplier = pd.DataFrame(
+            [
+                {
+                    "SupplierSku": "100",
+                    "Short Description": "Speaker",
+                    "Brand": "Sony",
+                    "Cost": "5",
+                    "Price": "11",
+                },
+                {
+                    "SupplierSku": "400",
+                    "Short Description": "Headphones",
+                    "Brand": "Sony",
+                    "Cost": "12",
+                    "Price": "40",
+                },
+                {
+                    "SupplierSku": "500",
+                    "Short Description": "Amp",
+                    "Brand": " ACME ",
+                    "Cost": "9",
+                    "Price": "30",
+                },
+            ]
+        )
+        supplier_bytes = _to_csv_bytes(df_supplier)
+
+        result = _compute_supplier_result(
+            hicore_bytes=hicore_bytes,
+            supplier_name="EM Nordic",
+            supplier_file_name="supplier.csv",
+            supplier_bytes=supplier_bytes,
+            profile_mapping={
+                "Art.m\u00e4rkning": "SupplierSku",
+                "Varum\u00e4rke": "Brand",
+                "Ink\u00f6pspris": "Cost",
+                "UtprisInklMoms": "Price",
+            },
+            profile_composite_fields={
+                "Artikelnamn": ["Short Description", "Brand"],
+            },
+            profile_filters={
+                "brand_source_column": "Brand",
+                "excluded_brand_values": ["acme"],
+            },
+        )
+
+        self.assertEqual(result.new_products_count, 1)
+        self.assertEqual(result.new_products_df["sku"].tolist(), ["400"])
+        self.assertEqual(result.new_products_df["name"].tolist(), ["Headphones Sony"])
+        self.assertEqual(result.price_updates_out_of_stock_count, 1)
+        self.assertEqual(result.price_updates_out_of_stock_df["sku"].tolist(), ["100", "100"])
+
 
 if __name__ == "__main__":
     unittest.main()
