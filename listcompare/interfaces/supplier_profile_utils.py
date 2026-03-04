@@ -457,6 +457,7 @@ def build_supplier_hicore_renamed_copy(
     excluded_brand_values: Optional[list[str]] = None,
     strip_leading_zeros_from_sku: bool = False,
     ignore_rows_missing_sku: bool = False,
+    source_row_column: str = "",
 ) -> pd.DataFrame:
     normalized_target_to_source = {
         str(target).strip(): str(source).strip()
@@ -552,5 +553,14 @@ def build_supplier_hicore_renamed_copy(
         ordered_targets.append(target_column)
 
     renamed_df[SUPPLIER_HICORE_SUPPLIER_COLUMN] = normalized_supplier_name
-    renamed_df = renamed_df.loc[:, [*ordered_targets, SUPPLIER_HICORE_SUPPLIER_COLUMN]]
+    ordered_output_columns = [*ordered_targets, SUPPLIER_HICORE_SUPPLIER_COLUMN]
+
+    normalized_source_row_column = str(source_row_column).strip()
+    if normalized_source_row_column != "":
+        renamed_df[normalized_source_row_column] = prepared_df.index.map(
+            lambda raw_index: int(raw_index) + 2
+        )
+        ordered_output_columns.append(normalized_source_row_column)
+
+    renamed_df = renamed_df.loc[:, ordered_output_columns]
     return renamed_df.reset_index(drop=True)

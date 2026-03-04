@@ -31,7 +31,7 @@ from .ui.common import (
     SUPPLIER_PROFILE_MODE_OVERVIEW,
     SUPPLIER_TRANSFORM_PROFILES_PATH,
 )
-from .ui.data_io import _df_excel_bytes, _read_supplier_upload
+from .ui.data_io import _read_supplier_upload
 from .ui.state import (
     _clear_supplier_state,
     _delete_supplier_transform_profile,
@@ -97,12 +97,12 @@ def _render_supplier_profile_editor(
 
     st.subheader("Profilredigering")
     st.caption(
-        "Matcha leverant\u00f6rens kolumner mot HiCore-kolumner och exportera en kopia med omd\u00f6pta kolumnnamn."
+        "Matcha leverant\u00f6rens kolumner mot HiCore-kolumner och spara regler f\u00f6r den valda leverant\u00f6ren."
     )
     st.caption(
         f'Kolumnen "{SUPPLIER_HICORE_SUPPLIER_COLUMN}" s\u00e4tts fr\u00e5n vald leverant\u00f6r i leverant\u00f6rslistan.'
     )
-    st.caption("Endast matchade kolumner exporteras. Resultatet exporteras som Excel (.xlsx).")
+    st.caption("F\u00f6rhandsvisningen visar bara de kolumner som matchas av profilreglerna.")
 
     supplier_file = _render_file_input(
         kind="supplier",
@@ -594,11 +594,11 @@ def _render_supplier_profile_editor(
         return
     if selected_supplier_name == "":
         st.info(
-            f'V\u00e4lj "{SUPPLIER_HICORE_SUPPLIER_COLUMN}" fr\u00e5n leverant\u00f6rslistan f\u00f6r att skapa exportfilen.'
+            f'V\u00e4lj "{SUPPLIER_HICORE_SUPPLIER_COLUMN}" fr\u00e5n leverant\u00f6rslistan f\u00f6r att arbeta vidare med profilen.'
         )
         return
     if not target_to_source and not composite_fields:
-        st.info("Matcha minst en HiCore-kolumn f\u00f6r att skapa exportfilen.")
+        st.info("Matcha minst en HiCore-kolumn f\u00f6r att visa f\u00f6rhandsvisningen.")
         return
     if current_name_mode == _NAME_MODE_COMPOSITE and len(composite_name_sources) < 2:
         st.info("V\u00e4lj minst tv\u00e5 kolumner f\u00f6r att bygga ett sammansatt artikelnamn.")
@@ -611,7 +611,7 @@ def _render_supplier_profile_editor(
         return
     if missing_target_columns:
         st.info(
-            "Omatchade HiCore-kolumner tas inte med i exportfilen: "
+            "Omatchade HiCore-kolumner tas inte med i f\u00f6rhandsvisningen: "
             + ", ".join(missing_target_columns)
         )
     if (
@@ -724,17 +724,17 @@ def _render_supplier_profile_editor(
     )
     if missing_target_columns:
         st.success(
-            "Delvis kolumnmappning klar. Omatchade HiCore-kolumner utel\u00e4mnas i exportfilen."
+            "Delvis kolumnmappning klar. Omatchade HiCore-kolumner utel\u00e4mnas i f\u00f6rhandsvisningen nedan."
         )
     else:
-        st.success("Kolumnmappningen \u00e4r komplett. Exportfilen \u00e4r klar.")
+        st.success("Kolumnmappningen \u00e4r komplett. F\u00f6rhandsvisning finns nedan.")
     st.caption(
-        "SKU-regler i exporten: "
+        "SKU-regler i f\u00f6rhandsvisningen: "
         f"ta bort inledande nollor = {'Ja' if strip_leading_zeros_from_sku else 'Nej'}, "
         f"ignorera rader utan SKU = {'Ja' if ignore_rows_missing_sku else 'Nej'}."
     )
     st.caption(
-        "Varumärkesfilter i exporten: "
+        "Varumärkesfilter i förhandsvisningen: "
         f"brand-kolumn = {str(current_profile_filters[SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN]).strip() or '(ingen vald)'}, "
         f"exkluderade värden = "
         + (
@@ -754,17 +754,9 @@ def _render_supplier_profile_editor(
     st.dataframe(pd.DataFrame(mapping_rows), use_container_width=True)
 
     preview_rows = min(len(renamed_df), 20)
-    st.caption(f"F\u00f6rhandsvisning av resultatet ({preview_rows} f\u00f6rsta raderna)")
+    st.caption(f"F\u00f6rhandsvisning av transformerade kolumner ({preview_rows} f\u00f6rsta raderna)")
     st.dataframe(renamed_df.head(preview_rows), use_container_width=True)
 
-    export_file_name = f"{Path(supplier_file_name).stem}_hicore_kolumnnamn.xlsx"
-    st.download_button(
-        label="Ladda ner ombyggd leverant\u00f6rsfil (Excel)",
-        data=_df_excel_bytes(renamed_df, sheet_name="HiCore-format"),
-        file_name=export_file_name,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key=f"download_supplier_hicore_renamed_{file_token}",
-    )
 
 
 

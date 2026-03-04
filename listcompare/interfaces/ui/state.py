@@ -168,6 +168,12 @@ def _init_session_state() -> None:
         "compare_ui_error": None,
         "supplier_ui_result": None,
         "supplier_ui_error": None,
+        "supplier_prepared_df": None,
+        "supplier_prepared_signature": None,
+        "supplier_prepared_file_name": None,
+        "supplier_prepared_excel_bytes": None,
+        "supplier_prepare_analysis": None,
+        "supplier_prepare_resolution_choices": {},
         "excluded_brands": list(ui_settings.get("excluded_brands", [])),
         "supplier_internal_name": None,
         "supplier_transform_internal_name": None,
@@ -199,9 +205,23 @@ def _clear_compare_state() -> None:
     st.session_state["compare_ui_error"] = None
 
 
-def _clear_supplier_state() -> None:
+def _clear_supplier_result_state() -> None:
     st.session_state["supplier_ui_result"] = None
     st.session_state["supplier_ui_error"] = None
+
+
+def _clear_supplier_prepare_state() -> None:
+    st.session_state["supplier_prepared_df"] = None
+    st.session_state["supplier_prepared_signature"] = None
+    st.session_state["supplier_prepared_file_name"] = None
+    st.session_state["supplier_prepared_excel_bytes"] = None
+    st.session_state["supplier_prepare_analysis"] = None
+    st.session_state["supplier_prepare_resolution_choices"] = {}
+
+
+def _clear_supplier_state() -> None:
+    _clear_supplier_result_state()
+    _clear_supplier_prepare_state()
 
 
 def _clear_all_run_state() -> None:

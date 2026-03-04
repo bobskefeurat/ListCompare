@@ -4,6 +4,10 @@ import unittest
 import pandas as pd
 
 from listcompare.core.product_model import HICORE_COLUMNS
+from listcompare.interfaces.supplier_prepare_utils import (
+    build_supplier_prepare_analysis,
+    finalize_supplier_prepare_analysis,
+)
 from listcompare.interfaces.supplier_profile_utils import (
     SUPPLIER_HICORE_RENAME_COLUMNS,
     SUPPLIER_HICORE_SUPPLIER_COLUMN,
@@ -97,13 +101,10 @@ class SupplierUiExportTests(unittest.TestCase):
                 },
             ]
         )
-        supplier_bytes = _to_csv_bytes(df_supplier)
-
         result = _compute_supplier_result(
             hicore_bytes=hicore_bytes,
             supplier_name="EM Nordic",
-            supplier_file_name="supplier.csv",
-            supplier_bytes=supplier_bytes,
+            supplier_df=df_supplier,
         )
 
         outgoing_export = _read_excel_bytes(result.outgoing_excel_bytes)
@@ -180,13 +181,9 @@ class SupplierUiExportTests(unittest.TestCase):
                 },
             ]
         )
-        supplier_bytes = _to_csv_bytes(df_supplier)
-
-        result = _compute_supplier_result(
-            hicore_bytes=hicore_bytes,
+        prepare_analysis = build_supplier_prepare_analysis(
+            df_supplier,
             supplier_name="EM Nordic",
-            supplier_file_name="supplier.csv",
-            supplier_bytes=supplier_bytes,
             profile_mapping={
                 "Art.m\u00e4rkning": "SupplierSku",
                 "Varum\u00e4rke": "Brand",
@@ -200,6 +197,16 @@ class SupplierUiExportTests(unittest.TestCase):
                 "brand_source_column": "Brand",
                 "excluded_brand_values": ["acme"],
             },
+        )
+        prepared_supplier_df = finalize_supplier_prepare_analysis(
+            prepare_analysis,
+            selected_candidates={},
+        )
+
+        result = _compute_supplier_result(
+            hicore_bytes=hicore_bytes,
+            supplier_name="EM Nordic",
+            supplier_df=prepared_supplier_df,
         )
 
         self.assertEqual(result.new_products_count, 1)

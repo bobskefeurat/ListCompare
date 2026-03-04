@@ -17,26 +17,13 @@ from ...core.supplier_products import (
     find_supplier_id_column,
     find_supplier_price_column,
 )
-from ..supplier_profile_utils import (
-    SUPPLIER_HICORE_RENAME_COLUMNS,
-    SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN,
-    SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES,
-    SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU,
-    SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS,
-    build_supplier_hicore_renamed_copy,
-    matches_profile_output_format,
-    missing_profile_source_columns,
-    normalize_supplier_transform_profile_filters,
-    normalize_supplier_transform_profile_mapping,
-    normalize_supplier_transform_profile_options,
-)
+from ..supplier_profile_utils import SUPPLIER_HICORE_RENAME_COLUMNS
 from .common import CompareUiResult, SupplierUiResult
 from .data_io import (
     _df_excel_bytes,
     _mismatch_map_to_df,
     _normalized_skus_for_excluded_brands,
     _product_map_to_df,
-    _read_supplier_upload,
     _sku_csv_bytes,
     _uploaded_csv_to_df,
 )
@@ -144,76 +131,6 @@ def _build_supplier_price_export_df(
     return _sort_df_by_sku_column(export_df, sku_column=sku_column_name)
 
 
-def _prepare_supplier_df_for_compare(
-    *,
-    supplier_name: str,
-    supplier_file_name: str,
-    supplier_bytes: bytes,
-    profile_mapping: Optional[dict[str, str]] = None,
-    profile_composite_fields: Optional[dict[str, list[str]]] = None,
-    profile_filters: Optional[dict[str, object]] = None,
-    profile_options: Optional[dict[str, bool]] = None,
-) -> pd.DataFrame:
-    df_supplier = _read_supplier_upload(supplier_file_name, supplier_bytes)
-    normalized_profile_mapping = normalize_supplier_transform_profile_mapping(
-        profile_mapping if isinstance(profile_mapping, dict) else {}
-    )
-    normalized_profile_composite_fields = (
-        profile_composite_fields if isinstance(profile_composite_fields, dict) else {}
-    )
-    normalized_profile_filters = normalize_supplier_transform_profile_filters(
-        profile_filters if isinstance(profile_filters, dict) else {}
-    )
-    normalized_profile_options = normalize_supplier_transform_profile_options(
-        profile_options if isinstance(profile_options, dict) else {}
-    )
-
-    if not normalized_profile_mapping and not normalized_profile_composite_fields:
-        return df_supplier
-
-    source_columns = [str(column).strip() for column in df_supplier.columns]
-    if matches_profile_output_format(
-        normalized_profile_mapping,
-        source_columns,
-        composite_fields=normalized_profile_composite_fields,
-    ):
-        return df_supplier
-
-    missing_columns = missing_profile_source_columns(
-        normalized_profile_mapping,
-        source_columns,
-        composite_fields=normalized_profile_composite_fields,
-        filters=normalized_profile_filters,
-    )
-    if missing_columns:
-        raise ValueError(
-            "Uppladdad leverantörsfil matchar inte profilen. Saknade kolumner: "
-            + ", ".join(missing_columns)
-        )
-
-    return build_supplier_hicore_renamed_copy(
-        df_supplier,
-        target_to_source=normalized_profile_mapping,
-        supplier_name=supplier_name,
-        composite_fields=normalized_profile_composite_fields,
-        brand_source_column=str(
-            normalized_profile_filters[SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN]
-        ),
-        excluded_brand_values=[
-            str(value)
-            for value in normalized_profile_filters[
-                SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES
-            ]
-        ],
-        strip_leading_zeros_from_sku=normalized_profile_options[
-            SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS
-        ],
-        ignore_rows_missing_sku=normalized_profile_options[
-            SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU
-        ],
-    )
-
-
 def _compute_compare_result(
     hicore_bytes: bytes,
     magento_bytes: bytes,
@@ -251,13 +168,8 @@ def _compute_supplier_result(
     hicore_bytes: bytes,
     *,
     supplier_name: str,
-    supplier_file_name: str,
-    supplier_bytes: bytes,
+    supplier_df: pd.DataFrame,
     excluded_brands: Optional[list[str]] = None,
-    profile_mapping: Optional[dict[str, str]] = None,
-    profile_composite_fields: Optional[dict[str, list[str]]] = None,
-    profile_filters: Optional[dict[str, object]] = None,
-    profile_options: Optional[dict[str, bool]] = None,
 ) -> SupplierUiResult:
     df_hicore = _uploaded_csv_to_df(hicore_bytes, sep=";")
     hicore_map = build_product_map(
@@ -269,15 +181,7 @@ def _compute_supplier_result(
         df_hicore,
         excluded_brands or [],
     )
-    df_supplier = _prepare_supplier_df_for_compare(
-        supplier_name=supplier_name,
-        supplier_file_name=supplier_file_name,
-        supplier_bytes=supplier_bytes,
-        profile_mapping=profile_mapping,
-        profile_composite_fields=profile_composite_fields,
-        profile_filters=profile_filters,
-        profile_options=profile_options,
-    )
+    df_supplier = supplier_df.copy()
     supplier_source_columns = [str(column).strip() for column in df_supplier.columns]
     id_column = find_supplier_id_column(df_supplier)
     price_column = find_supplier_price_column(df_supplier)
