@@ -3,7 +3,7 @@ import unittest
 
 import pandas as pd
 
-from listcompare.core.product_model import HICORE_COLUMNS
+from listcompare.core.product_schema import HICORE_COLUMNS
 from listcompare.interfaces.supplier_prepare_utils import (
     build_supplier_prepare_analysis,
     finalize_supplier_prepare_analysis,
@@ -12,7 +12,7 @@ from listcompare.interfaces.supplier_profile_utils import (
     SUPPLIER_HICORE_RENAME_COLUMNS,
     SUPPLIER_HICORE_SUPPLIER_COLUMN,
 )
-from listcompare.interfaces.ui.compute import _compute_supplier_result
+from listcompare.interfaces.ui.compute_supplier import _compute_supplier_result
 
 
 def _to_csv_bytes(df: pd.DataFrame) -> bytes:

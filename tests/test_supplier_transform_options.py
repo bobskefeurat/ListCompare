@@ -6,7 +6,7 @@ from listcompare.interfaces.supplier_profile_utils import (
     load_supplier_transform_profiles,
     save_supplier_transform_profiles,
 )
-from listcompare.interfaces.ui_app import (
+from listcompare.interfaces.ui.app import (
     _build_supplier_hicore_renamed_copy,
     _matches_profile_output_format,
     _missing_profile_source_columns,

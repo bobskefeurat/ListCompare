@@ -4,14 +4,14 @@ from typing import Optional
 
 import streamlit as st
 
-from .supplier_profile_utils import (
+from ..supplier_profile_utils import (
     # Re-exported for compatibility with existing tests/importers.
     build_supplier_hicore_renamed_copy as _build_supplier_hicore_renamed_copy,
     matches_profile_output_format as _matches_profile_output_format,
     missing_profile_source_columns as _missing_profile_source_columns,
     profile_has_required_sku_mapping as _profile_has_required_sku_mapping,
 )
-from .ui.common import (
+from .common import (
     BRAND_INDEX_PATH,
     COMPARE_PAGE_MODE_PRODUCTS,
     COMPARE_PAGE_MODE_WEB_ORDERS,
@@ -27,8 +27,8 @@ from .ui.common import (
     CompareUiResult,
     WebOrderCompareUiResult,
 )
-from .ui.compute import _compute_compare_result, _compute_web_order_compare_result
-from .ui.data_io import (
+from .compute_compare import _compute_compare_result, _compute_web_order_compare_result
+from .data_io import (
     _load_brands_from_index,
     _load_names_from_uploaded_hicore,
     _load_suppliers_from_index,
@@ -38,7 +38,11 @@ from .ui.data_io import (
     _save_suppliers_to_index,
     _style_stock_mismatch_df,
 )
-from .ui.state import (
+from .shared.presentation import (
+    build_progress_updater as _build_progress_updater,
+    with_one_based_index as _with_one_based_index,
+)
+from .state import (
     _clear_all_run_state,
     _get_stored_file,
     _init_session_state,
@@ -47,36 +51,8 @@ from .ui.state import (
     _render_file_input,
     _sync_supplier_selection_session_state,
 )
-from .ui_supplier_compare import _render_supplier_compare_tab
-from .ui_supplier_profiles import _render_supplier_transform_tab
-
-
-def _with_one_based_index(df):
-    display_df = df.copy()
-    display_df.index = range(1, len(display_df) + 1)
-    return display_df
-
-
-def _build_progress_updater(*, label: str):
-    status_placeholder = st.empty()
-    progress_placeholder = st.empty()
-    progress_bar = progress_placeholder.progress(0)
-
-    def _update(progress: float, message: str) -> None:
-        clamped = max(0.0, min(1.0, float(progress)))
-        percent = int(round(clamped * 100))
-        status_text = str(message).strip()
-        if status_text != "":
-            status_placeholder.caption(f"{label}: {status_text} ({percent}%)")
-        else:
-            status_placeholder.caption(f"{label}: {percent}%")
-        progress_bar.progress(percent)
-
-    def _clear() -> None:
-        status_placeholder.empty()
-        progress_placeholder.empty()
-
-    return _update, _clear
+from .features.supplier_compare.page import _render_supplier_compare_tab
+from .features.supplier_profiles.page import _render_supplier_transform_tab
 
 
 def _render_product_compare_results(result: CompareUiResult) -> None:

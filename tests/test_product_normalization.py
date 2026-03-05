@@ -1,9 +1,9 @@
 import unittest
 
-from listcompare.core.product_model import compute_hicore_stock, normalise_price, normalise_stock
+from listcompare.core.product_normalization import compute_hicore_stock, normalise_price, normalise_stock
 
 
-class ProductModelTests(unittest.TestCase):
+class ProductNormalizationTests(unittest.TestCase):
     def test_normalise_stock_handles_decimal_comma_and_trailing_zeroes(self) -> None:
         self.assertEqual(normalise_stock(" 1,2300 "), "1.23")
         self.assertEqual(normalise_stock("0,00"), "0")

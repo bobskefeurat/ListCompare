@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
@@ -6,7 +6,7 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-from .supplier_profile_utils import (
+from ....supplier_profile_utils import (
     SUPPLIER_HICORE_NAME_COLUMN,
     SUPPLIER_HICORE_RENAME_COLUMNS,
     SUPPLIER_HICORE_SKU_COLUMN,
@@ -18,40 +18,31 @@ from .supplier_profile_utils import (
     SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU,
     SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS,
     build_supplier_hicore_renamed_copy as _build_supplier_hicore_renamed_copy,
-    filter_supplier_names as _filter_supplier_names,
     normalize_supplier_transform_profile_details as _normalize_supplier_transform_profile_details,
     normalize_supplier_transform_profile_filters as _normalize_supplier_transform_profile_filters,
     normalize_supplier_transform_profile_options as _normalize_supplier_transform_profile_options,
-    selected_dataframe_row_index as _selected_dataframe_row_index,
     find_duplicate_names as _find_duplicate_names,
 )
-from .ui.common import (
+from ...common import (
     SUPPLIER_INDEX_PATH,
     SUPPLIER_PROFILE_MODE_EDITOR,
     SUPPLIER_PROFILE_MODE_OVERVIEW,
     SUPPLIER_TRANSFORM_PROFILES_PATH,
 )
-from .ui.data_io import _read_supplier_upload
-from .ui.state import (
+from ...data_io import _read_supplier_upload
+from ...shared.presentation import with_one_based_index as _with_one_based_index
+from ...state import (
     _clear_supplier_state,
     _delete_supplier_transform_profile,
     _normalize_selected_supplier_for_options,
     _persist_supplier_transform_profile,
     _render_file_input,
-    _request_supplier_profile_editor,
     _rerun,
-    _split_suppliers_by_profile,
     _sync_selected_supplier_between_views,
 )
 
 _NAME_MODE_SINGLE = "single"
 _NAME_MODE_COMPOSITE = "composite"
-
-
-def _with_one_based_index(df: pd.DataFrame) -> pd.DataFrame:
-    display_df = df.copy()
-    display_df.index = range(1, len(display_df) + 1)
-    return display_df
 
 
 def _supplier_profile_summary_value(
@@ -756,121 +747,3 @@ def _render_supplier_profile_editor(
 
 
 
-def _render_supplier_profiles_overview(*, supplier_options: list[str]) -> None:
-    st.subheader("Leverantörsprofiler")
-    st.caption("Profilerna är ett fristående bibliotek. Välj leverantör för att öppna eller skapa profil.")
-
-    search_query = st.text_input(
-        "Sök leverantör",
-        placeholder="Sök i båda listorna...",
-        key="supplier_profiles_search_query",
-    )
-    suppliers_with_profile, suppliers_without_profile = _split_suppliers_by_profile(supplier_options)
-    filtered_with_profile = _filter_supplier_names(suppliers_with_profile, search_query)
-    filtered_without_profile = _filter_supplier_names(suppliers_without_profile, search_query)
-
-    with_col, without_col = st.columns(2)
-
-    with with_col:
-        st.markdown(f"**Har profil ({len(filtered_with_profile)}/{len(suppliers_with_profile)})**")
-        selected_with_profile: Optional[str] = None
-        if filtered_with_profile:
-            st.caption("Välj leverantör med profil")
-            with st.container(height=320, border=True):
-                with_profile_event = st.dataframe(
-                    pd.DataFrame({"Leverantör": filtered_with_profile}),
-                    hide_index=True,
-                    use_container_width=True,
-                    height=300,
-                    key="supplier_profiles_with_profile_table",
-                    on_select="rerun",
-                    selection_mode="single-cell",
-                )
-            selected_idx = _selected_dataframe_row_index(with_profile_event)
-            if selected_idx is not None:
-                if 0 <= selected_idx < len(filtered_with_profile):
-                    selected_with_profile = filtered_with_profile[selected_idx]
-        else:
-            st.caption("Inga leverantörer matchar sökningen.")
-
-        if st.button(
-            "\u00d6ppna profil",
-            type="secondary",
-            disabled=selected_with_profile is None,
-            key="open_supplier_profile_from_overview_button",
-        ):
-            _request_supplier_profile_editor(str(selected_with_profile))
-
-    with without_col:
-        st.markdown(
-            f"**Saknar profil ({len(filtered_without_profile)}/{len(suppliers_without_profile)})**"
-        )
-        selected_without_profile: Optional[str] = None
-        if filtered_without_profile:
-            st.caption("Välj leverantör utan profil")
-            with st.container(height=320, border=True):
-                without_profile_event = st.dataframe(
-                    pd.DataFrame({"Leverantör": filtered_without_profile}),
-                    hide_index=True,
-                    use_container_width=True,
-                    height=300,
-                    key="supplier_profiles_without_profile_table",
-                    on_select="rerun",
-                    selection_mode="single-cell",
-                )
-            selected_idx = _selected_dataframe_row_index(without_profile_event)
-            if selected_idx is not None:
-                if 0 <= selected_idx < len(filtered_without_profile):
-                    selected_without_profile = filtered_without_profile[selected_idx]
-        else:
-            st.caption("Inga leverantörer matchar sökningen.")
-
-        if st.button(
-            "Skapa profil",
-            type="secondary",
-            disabled=selected_without_profile is None,
-            key="create_supplier_profile_from_overview_button",
-        ):
-            _request_supplier_profile_editor(str(selected_without_profile))
-
-
-
-def _render_supplier_transform_tab(
-    *,
-    supplier_options: list[str],
-    supplier_index_error: Optional[str],
-) -> None:
-    if not supplier_options:
-        st.warning(
-            f"Inga leverantörer hittades i {SUPPLIER_INDEX_PATH.name}. Lägg till leverantörer först."
-        )
-        return
-
-    profile_mode = st.session_state.get("supplier_profiles_mode", SUPPLIER_PROFILE_MODE_OVERVIEW)
-    if profile_mode not in (SUPPLIER_PROFILE_MODE_OVERVIEW, SUPPLIER_PROFILE_MODE_EDITOR):
-        profile_mode = SUPPLIER_PROFILE_MODE_OVERVIEW
-        st.session_state["supplier_profiles_mode"] = profile_mode
-
-    if profile_mode == SUPPLIER_PROFILE_MODE_EDITOR:
-        _render_supplier_profile_editor(
-            supplier_options=supplier_options,
-            supplier_index_error=supplier_index_error,
-        )
-        return
-
-    if supplier_index_error:
-        st.warning(
-            f"Kunde inte läsa {SUPPLIER_INDEX_PATH.name} vid uppstart: {supplier_index_error}"
-        )
-    if st.session_state.get("supplier_transform_profiles_load_error"):
-        st.warning(
-            "Kunde inte läsa "
-            f"{SUPPLIER_TRANSFORM_PROFILES_PATH.name} vid uppstart: "
-            f"{st.session_state['supplier_transform_profiles_load_error']}"
-        )
-    if st.session_state.get("supplier_transform_profiles_save_error"):
-        st.warning(
-            f"Kunde inte spara {SUPPLIER_TRANSFORM_PROFILES_PATH.name}: "
-            f"{st.session_state['supplier_transform_profiles_save_error']}"
-        )
-    _render_supplier_profiles_overview(supplier_options=supplier_options)

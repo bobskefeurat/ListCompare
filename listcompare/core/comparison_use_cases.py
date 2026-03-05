@@ -9,7 +9,7 @@ from .product_diff import (
     find_missing_skus,
     normalize_sku,
 )
-from .product_model import Product
+from .product_schema import Product
 
 MismatchMap = dict[str, dict[str, list[Product]]]
 

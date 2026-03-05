@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Optional
 
@@ -9,15 +8,14 @@ import streamlit as st
 from ..supplier_profile_utils import (
     SUPPLIER_TRANSFORM_DEFAULT_FILTERS,
     SUPPLIER_TRANSFORM_DEFAULT_OPTIONS,
-    load_supplier_transform_profiles as _load_supplier_transform_profiles,
     normalize_supplier_transform_profile_details as _normalize_supplier_transform_profile_details,
     normalize_supplier_transform_profile_filters as _normalize_supplier_transform_profile_filters,
     normalize_supplier_transform_profile_mapping as _normalize_supplier_transform_profile_mapping,
     normalize_supplier_transform_profile_options as _normalize_supplier_transform_profile_options,
     ordered_supplier_transform_profile_composite_fields as _ordered_supplier_transform_profile_composite_fields,
     ordered_supplier_transform_profile_mapping as _ordered_supplier_transform_profile_mapping,
-    save_supplier_transform_profiles as _save_supplier_transform_profiles,
 )
+from .persistence import profile_store as _profile_store
 from .common import (
     COMPARE_PAGE_MODE_PRODUCTS,
     FILE_STATE_KEYS,
@@ -29,7 +27,9 @@ from .common import (
     UI_SETTINGS_PATH,
     UPLOADER_KEYS_BY_KIND,
 )
-from .data_io import _normalize_supplier_names
+from .persistence import settings_store as _settings_store
+
+
 def _get_supplier_transform_profile(
     supplier_name: str,
 ) -> tuple[dict[str, str], dict[str, bool]]:
@@ -123,42 +123,16 @@ def _split_suppliers_by_profile(supplier_options: list[str]) -> tuple[list[str],
 
 
 def _load_ui_settings(path: Path) -> tuple[dict[str, list[str]], Optional[str]]:
-    default_settings: dict[str, list[str]] = {"excluded_brands": []}
-    if not path.exists():
-        return default_settings, None
-
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8-sig"))
-        if not isinstance(raw, dict):
-            raise ValueError("ui_settings.json m\u00e5ste inneh\u00e5lla ett JSON-objekt.")
-
-        raw_excluded = raw.get("excluded_brands", [])
-        if not isinstance(raw_excluded, list):
-            raise ValueError('F\u00e4ltet "excluded_brands" m\u00e5ste vara en lista.')
-
-        excluded_brands = _normalize_supplier_names([str(name) for name in raw_excluded])
-        return {"excluded_brands": excluded_brands}, None
-    except Exception as exc:
-        return default_settings, str(exc)
+    return _settings_store.load_ui_settings(path)
 
 
 def _save_ui_settings(path: Path, *, excluded_brands: list[str]) -> Optional[str]:
-    payload = {
-        "excluded_brands": _normalize_supplier_names([str(name) for name in excluded_brands]),
-    }
-    try:
-        path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        return None
-    except Exception as exc:
-        return str(exc)
+    return _settings_store.save_ui_settings(path, excluded_brands=excluded_brands)
 
 
 def _init_session_state() -> None:
     ui_settings, ui_settings_error = _load_ui_settings(UI_SETTINGS_PATH)
-    supplier_transform_profiles, supplier_transform_profiles_error = _load_supplier_transform_profiles(
+    supplier_transform_profiles, supplier_transform_profiles_error = _profile_store.load_profiles(
         SUPPLIER_TRANSFORM_PROFILES_PATH
     )
     defaults = {
@@ -307,7 +281,7 @@ def _persist_supplier_transform_profile(
         profile_payload["filters"] = normalized_filters
     profiles[normalized_supplier_name] = profile_payload
 
-    save_error = _save_supplier_transform_profiles(
+    save_error = _profile_store.save_profiles(
         SUPPLIER_TRANSFORM_PROFILES_PATH,
         profiles=profiles,
     )
@@ -349,7 +323,7 @@ def _delete_supplier_transform_profile(*, supplier_name: str) -> Optional[str]:
             normalized_profile["filters"] = normalized_profile_filters
         profiles[name] = normalized_profile
 
-    save_error = _save_supplier_transform_profiles(
+    save_error = _profile_store.save_profiles(
         SUPPLIER_TRANSFORM_PROFILES_PATH,
         profiles=profiles,
     )

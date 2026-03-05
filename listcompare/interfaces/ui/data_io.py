@@ -9,8 +9,11 @@ import pandas as pd
 import streamlit as st
 
 from ...core.product_diff import ProductMap, normalize_sku
-from ...core.product_model import HICORE_COLUMNS, Product
+from ...core.product_schema import HICORE_COLUMNS, Product
 from .common import CSV_ENCODINGS
+from .persistence import index_store as _index_store
+
+
 def _uploaded_csv_to_df(
     data: bytes,
     *,
@@ -78,16 +81,7 @@ def _read_compare_magento_csv_upload(data: bytes) -> pd.DataFrame:
 
 
 def _normalize_supplier_names(raw_names: list[str]) -> list[str]:
-    unique_by_folded: dict[str, str] = {}
-    for raw_name in raw_names:
-        supplier_name = str(raw_name).strip()
-        if supplier_name == "" or supplier_name.casefold() == "nan":
-            continue
-        folded = supplier_name.casefold()
-        if folded not in unique_by_folded:
-            unique_by_folded[folded] = supplier_name
-
-    return sorted(unique_by_folded.values(), key=lambda name: name.casefold())
+    return _index_store.normalize_names(raw_names)
 
 
 def _supplier_names_from_hicore_df(df_hicore: pd.DataFrame) -> list[str]:
@@ -115,43 +109,19 @@ def _brand_names_from_hicore_df(df_hicore: pd.DataFrame) -> list[str]:
 
 
 def _load_suppliers_from_index(path: Path) -> tuple[list[str], Optional[str]]:
-    if not path.exists():
-        return [], f"Saknar leverant\u00f6rsindex: {path.name}"
-
-    try:
-        content = path.read_text(encoding="utf-8-sig")
-        suppliers = _normalize_supplier_names(content.splitlines())
-        return suppliers, None
-    except Exception as exc:
-        return [], str(exc)
+    return _index_store.load_suppliers_from_index(path)
 
 
 def _save_suppliers_to_index(path: Path, suppliers: list[str]) -> None:
-    normalized = _normalize_supplier_names(suppliers)
-    body = "\n".join(normalized)
-    if body != "":
-        body += "\n"
-    path.write_text(body, encoding="utf-8-sig")
+    _index_store.save_suppliers_to_index(path, suppliers)
 
 
 def _load_brands_from_index(path: Path) -> tuple[list[str], Optional[str]]:
-    if not path.exists():
-        return [], f"Saknar varum\u00e4rkesindex: {path.name}"
-
-    try:
-        content = path.read_text(encoding="utf-8-sig")
-        brands = _normalize_supplier_names(content.splitlines())
-        return brands, None
-    except Exception as exc:
-        return [], str(exc)
+    return _index_store.load_brands_from_index(path)
 
 
 def _save_brands_to_index(path: Path, brands: list[str]) -> None:
-    normalized = _normalize_supplier_names(brands)
-    body = "\n".join(normalized)
-    if body != "":
-        body += "\n"
-    path.write_text(body, encoding="utf-8-sig")
+    _index_store.save_brands_to_index(path, brands)
 
 
 def _merge_supplier_lists(existing: list[str], discovered: list[str]) -> tuple[list[str], list[str]]:

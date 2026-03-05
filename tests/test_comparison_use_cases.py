@@ -8,7 +8,7 @@ from listcompare.core.comparison_use_cases import (
     unique_sorted_skus_from_mismatch_side,
     unique_sorted_skus_from_product_map,
 )
-from listcompare.core.product_model import Product
+from listcompare.core.product_schema import Product
 
 
 def make_product(

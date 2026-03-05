@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Dict, List, Tuple
 
-from .product_model import Product
+from .product_schema import Product
 
 ProductMap = Dict[str, List[Product]]
 

@@ -3,8 +3,8 @@ import unittest
 
 import pandas as pd
 
-from listcompare.core.product_model import HICORE_COLUMNS
-from listcompare.interfaces.ui.compute import (
+from listcompare.core.product_schema import HICORE_COLUMNS
+from listcompare.interfaces.ui.compute_compare import (
     _compute_compare_result,
     _compute_web_order_compare_result,
 )
