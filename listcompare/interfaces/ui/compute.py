@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Optional
 
 import pandas as pd
@@ -29,6 +30,19 @@ from .data_io import (
     _sku_csv_bytes,
     _uploaded_csv_to_df,
 )
+
+ProgressCallback = Callable[[float, str], None]
+
+
+def _notify_progress(
+    progress_callback: Optional[ProgressCallback],
+    progress: float,
+    message: str,
+) -> None:
+    if progress_callback is None:
+        return
+    clamped_progress = max(0.0, min(1.0, float(progress)))
+    progress_callback(clamped_progress, message)
 
 
 def _to_clean_text(value: object) -> str:
@@ -206,24 +220,31 @@ def _compute_compare_result(
     magento_bytes: bytes,
     *,
     excluded_brands: Optional[list[str]] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> CompareUiResult:
+    _notify_progress(progress_callback, 0.05, "L\u00e4ser HiCore-fil")
     df_hicore = _uploaded_csv_to_df(hicore_bytes, sep=";")
+    _notify_progress(progress_callback, 0.20, "L\u00e4ser Magento-fil")
     df_magento = _read_compare_magento_csv_upload(magento_bytes)
+    _notify_progress(progress_callback, 0.40, "F\u00f6rbereder produktdata")
     hicore_map, magento_map = prepare_data(df_hicore, df_magento)
+    _notify_progress(progress_callback, 0.55, "Filtrerar exkluderade varum\u00e4rken")
     excluded_normalized_skus, warning_message = _normalized_skus_for_excluded_brands(
         df_hicore,
         excluded_brands or [],
     )
 
+    _notify_progress(progress_callback, 0.75, "J\u00e4mf\u00f6r produkter")
     results = build_comparison_results(
         hicore_map,
         magento_map,
         excluded_normalized_skus=excluded_normalized_skus,
     )
 
+    _notify_progress(progress_callback, 0.90, "Bygger export och f\u00f6rhandsvisning")
     only_in_magento_skus = unique_sorted_skus_from_product_map(results.only_in_magento)
     stock_skus = unique_sorted_skus_from_mismatch_side(results.stock_mismatches, "magento")
-    return CompareUiResult(
+    result = CompareUiResult(
         only_in_magento_df=_product_map_to_df(results.only_in_magento),
         stock_mismatch_df=_mismatch_map_to_df(results.stock_mismatches),
         only_in_magento_csv_bytes=_sku_csv_bytes(only_in_magento_skus),
@@ -232,26 +253,35 @@ def _compute_compare_result(
         stock_mismatch_count=len(results.stock_mismatches),
         warning_message=warning_message,
     )
+    _notify_progress(progress_callback, 1.0, "Klar")
+    return result
 
 
 def _compute_web_order_compare_result(
     hicore_bytes: bytes,
     magento_bytes: bytes,
+    *,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> WebOrderCompareUiResult:
+    _notify_progress(progress_callback, 0.10, "L\u00e4ser HiCore-fil")
     df_hicore = _uploaded_csv_to_df(hicore_bytes, sep=";")
+    _notify_progress(progress_callback, 0.35, "L\u00e4ser Magento-fil")
     df_magento = _read_compare_magento_csv_upload(magento_bytes)
+    _notify_progress(progress_callback, 0.75, "J\u00e4mf\u00f6r webborder")
     (
         magento_only_web_orders_df,
         magento_only_web_orders_csv_bytes,
         magento_only_web_orders_count,
         warning_message,
     ) = _build_magento_only_web_orders_result(df_hicore, df_magento)
-    return WebOrderCompareUiResult(
+    result = WebOrderCompareUiResult(
         magento_only_web_orders_df=magento_only_web_orders_df,
         magento_only_web_orders_csv_bytes=magento_only_web_orders_csv_bytes,
         magento_only_web_orders_count=magento_only_web_orders_count,
         warning_message=warning_message,
     )
+    _notify_progress(progress_callback, 1.0, "Klar")
+    return result
 
 
 def _compute_supplier_result(
@@ -260,17 +290,22 @@ def _compute_supplier_result(
     supplier_name: str,
     supplier_df: pd.DataFrame,
     excluded_brands: Optional[list[str]] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> SupplierUiResult:
+    _notify_progress(progress_callback, 0.05, "L\u00e4ser HiCore-fil")
     df_hicore = _uploaded_csv_to_df(hicore_bytes, sep=";")
+    _notify_progress(progress_callback, 0.15, "Bygger HiCore-karta")
     hicore_map = build_product_map(
         df_hicore,
         source="hicore",
         columns=HICORE_COLUMNS,
     )
+    _notify_progress(progress_callback, 0.25, "Filtrerar exkluderade varum\u00e4rken")
     excluded_normalized_skus, warning_message = _normalized_skus_for_excluded_brands(
         df_hicore,
         excluded_brands or [],
     )
+    _notify_progress(progress_callback, 0.35, "F\u00f6rbereder leverant\u00f6rsdata")
     df_supplier = supplier_df.copy()
     supplier_source_columns = [str(column).strip() for column in df_supplier.columns]
     id_column = find_supplier_id_column(df_supplier)
@@ -279,7 +314,9 @@ def _compute_supplier_result(
         supplier_source_columns,
         _hicore_purchase_column_name(),
     )
+    _notify_progress(progress_callback, 0.50, "Bygger leverant\u00f6rskarta")
     supplier_map = build_supplier_map(df_supplier)
+    _notify_progress(progress_callback, 0.62, "J\u00e4mf\u00f6r mot HiCore")
     results = build_supplier_comparison_results(
         hicore_map,
         supplier_map,
@@ -287,6 +324,7 @@ def _compute_supplier_result(
         excluded_normalized_skus=excluded_normalized_skus,
     )
 
+    _notify_progress(progress_callback, 0.74, "Bygger export f\u00f6r utg\u00e5ende och nyheter")
     outgoing_skus = unique_sorted_skus_from_product_map(results.outgoing)
     outgoing_export_df = pd.DataFrame(
         {
@@ -307,6 +345,7 @@ def _compute_supplier_result(
         sku_column=id_column,
     )
 
+    _notify_progress(progress_callback, 0.86, "Bygger export f\u00f6r prisuppdateringar")
     out_of_stock_normalized_skus = set(results.price_updates_out_of_stock.keys())
     in_stock_normalized_skus = set(results.price_updates_in_stock.keys())
     price_updates_out_of_stock_export_df = _build_supplier_price_export_df(
@@ -326,7 +365,8 @@ def _compute_supplier_result(
         include_purchase=False,
     )
 
-    return SupplierUiResult(
+    _notify_progress(progress_callback, 0.95, "Skapar Excelfiler")
+    result = SupplierUiResult(
         outgoing_df=_product_map_to_df(results.outgoing),
         new_products_df=_product_map_to_df(results.new_products),
         price_updates_out_of_stock_df=_mismatch_map_to_df(
@@ -353,3 +393,5 @@ def _compute_supplier_result(
         price_updates_in_stock_count=len(results.price_updates_in_stock),
         warning_message=warning_message,
     )
+    _notify_progress(progress_callback, 1.0, "Klar")
+    return result

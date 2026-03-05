@@ -49,6 +49,28 @@ def _prepared_supplier_success_message(
     return f'Leverantörsfilen för "{supplier_name}" är klar för jämförelse.'
 
 
+def _build_progress_updater(*, label: str):
+    status_placeholder = st.empty()
+    progress_placeholder = st.empty()
+    progress_bar = progress_placeholder.progress(0)
+
+    def _update(progress: float, message: str) -> None:
+        clamped = max(0.0, min(1.0, float(progress)))
+        percent = int(round(clamped * 100))
+        status_text = str(message).strip()
+        if status_text != "":
+            status_placeholder.caption(f"{label}: {status_text} ({percent}%)")
+        else:
+            status_placeholder.caption(f"{label}: {percent}%")
+        progress_bar.progress(percent)
+
+    def _clear() -> None:
+        status_placeholder.empty()
+        progress_placeholder.empty()
+
+    return _update, _clear
+
+
 def _store_prepared_supplier_df(
     *,
     prepared_df: pd.DataFrame,
@@ -392,9 +414,15 @@ def _render_supplier_compare_tab(
         disabled=not can_prepare_uploaded_file,
         key="rebuild_supplier_file_with_profile_button",
     ):
+        update_progress, clear_progress = _build_progress_updater(
+            label="Bygg om leverant\u00f6rsfil"
+        )
+        update_progress(0.0, "Startar")
         try:
             if current_prepare_signature is None or df_supplier_uploaded is None:
                 raise ValueError("Ladda upp en leverantörsfil som matchar profilen innan du bygger.")
+
+            update_progress(0.20, "Analyserar fil")
 
             prepare_analysis = _build_supplier_prepare_analysis(
                 df_supplier_uploaded,
@@ -413,8 +441,10 @@ def _render_supplier_compare_tab(
             st.session_state["supplier_compare_info_message"] = None
             _clear_supplier_result_state()
             st.session_state["supplier_ui_error"] = None
+            update_progress(0.70, "Analyserar dubletter")
 
             if not prepare_analysis.conflicts:
+                update_progress(0.90, "Slutf\u00f6r byggning")
                 prepared_df = _finalize_supplier_prepare_analysis(
                     prepare_analysis,
                     selected_candidates={},
@@ -428,11 +458,14 @@ def _render_supplier_compare_tab(
                     supplier_name=selected_supplier_name,
                     exact_duplicate_rows_removed=prepare_analysis.exact_duplicate_rows_removed,
                 )
+                update_progress(1.0, "Klar")
                 _rerun()
         except Exception as exc:
             _clear_supplier_prepare_state()
             _clear_supplier_result_state()
             st.session_state["supplier_ui_error"] = f"Kunde inte bygga om leverantörsfilen: {exc}"
+        finally:
+            clear_progress()
 
     if profile_col.button(
         profile_action_label,
@@ -526,18 +559,26 @@ def _render_supplier_compare_tab(
     )
 
     if run_clicked:
+        update_progress, clear_progress = _build_progress_updater(
+            label="Leverant\u00f6rsj\u00e4mf\u00f6relse"
+        )
+        update_progress(0.0, "Startar")
         try:
             result = _compute_supplier_result(
                 hicore_bytes=hicore_file["bytes"],  # type: ignore[index]
                 supplier_name=selected_supplier_name,
                 supplier_df=prepared_supplier_df,  # type: ignore[arg-type]
                 excluded_brands=[str(name) for name in excluded_brands],
+                progress_callback=update_progress,
             )
+            update_progress(1.0, "Klar")
             st.session_state["supplier_ui_result"] = result
             st.session_state["supplier_ui_error"] = None
         except Exception as exc:
             st.session_state["supplier_ui_result"] = None
             st.session_state["supplier_ui_error"] = str(exc)
+        finally:
+            clear_progress()
 
     st.caption(f"Antal leverantörer: {len(supplier_options)}")
     if new_supplier_names:

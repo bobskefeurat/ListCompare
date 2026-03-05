@@ -50,6 +50,29 @@ from .ui.state import (
 from .ui_supplier_compare import _render_supplier_compare_tab
 from .ui_supplier_profiles import _render_supplier_transform_tab
 
+
+def _build_progress_updater(*, label: str):
+    status_placeholder = st.empty()
+    progress_placeholder = st.empty()
+    progress_bar = progress_placeholder.progress(0)
+
+    def _update(progress: float, message: str) -> None:
+        clamped = max(0.0, min(1.0, float(progress)))
+        percent = int(round(clamped * 100))
+        status_text = str(message).strip()
+        if status_text != "":
+            status_placeholder.caption(f"{label}: {status_text} ({percent}%)")
+        else:
+            status_placeholder.caption(f"{label}: {percent}%")
+        progress_bar.progress(percent)
+
+    def _clear() -> None:
+        status_placeholder.empty()
+        progress_placeholder.empty()
+
+    return _update, _clear
+
+
 def _render_product_compare_results(result: CompareUiResult) -> None:
     if result.warning_message:
         st.warning(result.warning_message)
@@ -137,17 +160,25 @@ def _render_compare_page(*, excluded_brands: list[str]) -> None:
             disabled=not can_run,
             key="run_product_compare_button",
         ):
+            update_progress, clear_progress = _build_progress_updater(
+                label="Produktj\u00e4mf\u00f6relse"
+            )
+            update_progress(0.0, "Startar")
             try:
                 result = _compute_compare_result(
                     hicore_bytes=hicore_file["bytes"],  # type: ignore[index]
                     magento_bytes=magento_file["bytes"],  # type: ignore[index]
                     excluded_brands=[str(name) for name in excluded_brands],
+                    progress_callback=update_progress,
                 )
+                update_progress(1.0, "Klar")
                 st.session_state["compare_ui_result"] = result
                 st.session_state["compare_ui_error"] = None
             except Exception as exc:
                 st.session_state["compare_ui_result"] = None
                 st.session_state["compare_ui_error"] = str(exc)
+            finally:
+                clear_progress()
 
         if st.session_state["compare_ui_error"]:
             st.error(st.session_state["compare_ui_error"])
@@ -176,16 +207,22 @@ def _render_compare_page(*, excluded_brands: list[str]) -> None:
         disabled=not can_run,
         key="run_web_order_compare_button",
     ):
+        update_progress, clear_progress = _build_progress_updater(label="Orderj\u00e4mf\u00f6relse")
+        update_progress(0.0, "Startar")
         try:
             result = _compute_web_order_compare_result(
                 hicore_bytes=hicore_file["bytes"],  # type: ignore[index]
                 magento_bytes=magento_file["bytes"],  # type: ignore[index]
+                progress_callback=update_progress,
             )
+            update_progress(1.0, "Klar")
             st.session_state["web_order_compare_ui_result"] = result
             st.session_state["web_order_compare_ui_error"] = None
         except Exception as exc:
             st.session_state["web_order_compare_ui_result"] = None
             st.session_state["web_order_compare_ui_error"] = str(exc)
+        finally:
+            clear_progress()
 
     if st.session_state["web_order_compare_ui_error"]:
         st.error(st.session_state["web_order_compare_ui_error"])

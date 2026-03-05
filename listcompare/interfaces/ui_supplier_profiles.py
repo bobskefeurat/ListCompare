@@ -285,9 +285,16 @@ def _render_supplier_profile_editor(
             + ", ".join(duplicate_source_columns)
         )
 
+    source_preview_rows = min(len(df_supplier), 10)
+    source_preview_df = df_supplier.copy()
+    source_preview_df.columns = source_columns
     st.caption(f"Antal kolumner i leverant\u00f6rsfilen: {len(source_columns)}")
+    st.caption(
+        "F\u00f6rhandsvisning av leverant\u00f6rsfilen "
+        f"({source_preview_rows} f\u00f6rsta raderna med kolumnnamn)"
+    )
     st.dataframe(
-        pd.DataFrame({"Leverant\u00f6rskolumner": source_columns}),
+        source_preview_df.head(source_preview_rows),
         use_container_width=True,
     )
 
