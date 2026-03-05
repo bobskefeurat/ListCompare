@@ -71,6 +71,12 @@ def _build_progress_updater(*, label: str):
     return _update, _clear
 
 
+def _with_one_based_index(df: pd.DataFrame) -> pd.DataFrame:
+    display_df = df.copy()
+    display_df.index = range(1, len(display_df) + 1)
+    return display_df
+
+
 def _store_prepared_supplier_df(
     *,
     prepared_df: pd.DataFrame,
@@ -155,9 +161,20 @@ def _render_prepare_conflict_group(
     return selected_candidate_id
 
 
-def _render_supplier_results(result: SupplierUiResult) -> None:
+def _render_supplier_results(result: SupplierUiResult, *, supplier_name: str) -> None:
     if result.warning_message:
         st.warning(result.warning_message)
+
+    outgoing_display_df = result.outgoing_df.drop(columns=["map_key"], errors="ignore")
+    new_products_display_df = result.new_products_df.drop(columns=["map_key"], errors="ignore")
+    price_updates_out_of_stock_display_df = result.price_updates_out_of_stock_df.drop(
+        columns=["normalized_sku", "side"],
+        errors="ignore",
+    )
+    price_updates_in_stock_display_df = result.price_updates_in_stock_df.drop(
+        columns=["normalized_sku", "side"],
+        errors="ignore",
+    )
 
     metric_col_1, metric_col_2, metric_col_3, metric_col_4 = st.columns(4)
     metric_col_1.metric("Utgående", result.outgoing_count)
@@ -181,9 +198,15 @@ def _render_supplier_results(result: SupplierUiResult) -> None:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="download_supplier_outgoing_excel",
         )
-        st.dataframe(result.outgoing_df, use_container_width=True)
+        st.dataframe(_with_one_based_index(outgoing_display_df), use_container_width=True)
     with tab_new:
-        new_products_df = result.new_products_df
+        new_products_df = new_products_display_df.drop(columns=["stock"], errors="ignore")
+        if "supplier" in new_products_df.columns:
+            new_products_df["supplier"] = new_products_df["supplier"].map(
+                lambda value: supplier_name if pd.isna(value) or str(value).strip() == "" else value
+            )
+        else:
+            new_products_df["supplier"] = supplier_name
         if "name" in new_products_df.columns and "Artikelnamn" not in new_products_df.columns:
             new_products_df = new_products_df.rename(columns={"name": "Artikelnamn"})
         st.download_button(
@@ -193,7 +216,7 @@ def _render_supplier_results(result: SupplierUiResult) -> None:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="download_supplier_news_excel",
         )
-        st.dataframe(new_products_df, use_container_width=True)
+        st.dataframe(_with_one_based_index(new_products_df), use_container_width=True)
     with tab_price_oos:
         st.download_button(
             label="Ladda ner Prisuppdatering, Ej i lager.xlsx",
@@ -203,7 +226,7 @@ def _render_supplier_results(result: SupplierUiResult) -> None:
             key="download_supplier_price_oos_excel",
         )
         st.dataframe(
-            _style_stock_mismatch_df(result.price_updates_out_of_stock_df),
+            _style_stock_mismatch_df(_with_one_based_index(price_updates_out_of_stock_display_df)),
             use_container_width=True,
         )
     with tab_price_in:
@@ -215,7 +238,7 @@ def _render_supplier_results(result: SupplierUiResult) -> None:
             key="download_supplier_price_in_excel",
         )
         st.dataframe(
-            _style_stock_mismatch_df(result.price_updates_in_stock_df),
+            _style_stock_mismatch_df(_with_one_based_index(price_updates_in_stock_display_df)),
             use_container_width=True,
         )
 
@@ -377,12 +400,7 @@ def _render_supplier_compare_tab(
                 "Uppladdad leverantörsfil matchar redan HiCore-formatet. "
                 "Byggsteget kör ändå dublettkontrollen innan jämförelse."
             )
-        elif profile_ready and profile_matches_uploaded_file:
-            st.info(
-                "Leverantörsfilen kan byggas om via profilen. "
-                "Dublettkontrollen körs när du bygger filen."
-            )
-        elif profile_ready:
+        elif profile_ready and not profile_matches_uploaded_file:
             st.warning(
                 "Uppladdad leverantörsfil matchar inte den sparade profilen. Saknade kolumner: "
                 + ", ".join(missing_profile_columns_for_file)
@@ -593,4 +611,7 @@ def _render_supplier_compare_tab(
     if st.session_state["supplier_ui_error"]:
         st.error(st.session_state["supplier_ui_error"])
     if st.session_state["supplier_ui_result"] is not None:
-        _render_supplier_results(st.session_state["supplier_ui_result"])
+        _render_supplier_results(
+            st.session_state["supplier_ui_result"],
+            supplier_name=selected_supplier_name,
+        )

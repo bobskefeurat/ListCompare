@@ -51,6 +51,12 @@ from .ui_supplier_compare import _render_supplier_compare_tab
 from .ui_supplier_profiles import _render_supplier_transform_tab
 
 
+def _with_one_based_index(df):
+    display_df = df.copy()
+    display_df.index = range(1, len(display_df) + 1)
+    return display_df
+
+
 def _build_progress_updater(*, label: str):
     status_placeholder = st.empty()
     progress_placeholder = st.empty()
@@ -77,9 +83,18 @@ def _render_product_compare_results(result: CompareUiResult) -> None:
     if result.warning_message:
         st.warning(result.warning_message)
 
+    only_in_magento_display_df = result.only_in_magento_df.drop(
+        columns=["map_key", "price", "supplier"],
+        errors="ignore",
+    )
+    stock_mismatch_display_df = result.stock_mismatch_df.drop(
+        columns=["normalized_sku", "side"],
+        errors="ignore",
+    )
+
     col1, col2 = st.columns(2)
-    col1.metric("Only in Magento", result.only_in_magento_count)
-    col2.metric("Stock mismatches", result.stock_mismatch_count)
+    col1.metric("Unika i Magento", result.only_in_magento_count)
+    col2.metric("Lagerdiff", result.stock_mismatch_count)
 
     download_col1, download_col2 = st.columns(2)
     download_col1.download_button(
@@ -97,11 +112,14 @@ def _render_product_compare_results(result: CompareUiResult) -> None:
         key="download_stock_mismatch_csv",
     )
 
-    tab1, tab2 = st.tabs(["Only in Magento", "Stock mismatches"])
+    tab1, tab2 = st.tabs(["Unika i Magento", "Lagerdiff"])
     with tab1:
-        st.dataframe(result.only_in_magento_df, use_container_width=True)
+        st.dataframe(_with_one_based_index(only_in_magento_display_df), use_container_width=True)
     with tab2:
-        st.dataframe(_style_stock_mismatch_df(result.stock_mismatch_df), use_container_width=True)
+        st.dataframe(
+            _style_stock_mismatch_df(_with_one_based_index(stock_mismatch_display_df)),
+            use_container_width=True,
+        )
 
 
 def _render_web_order_compare_results(result: WebOrderCompareUiResult) -> None:
@@ -116,7 +134,10 @@ def _render_web_order_compare_results(result: WebOrderCompareUiResult) -> None:
         mime="text/csv",
         key="download_magento_only_web_orders_csv",
     )
-    st.dataframe(result.magento_only_web_orders_df, use_container_width=True)
+    st.dataframe(
+        _with_one_based_index(result.magento_only_web_orders_df),
+        use_container_width=True,
+    )
 
 
 def _render_compare_page(*, excluded_brands: list[str]) -> None:

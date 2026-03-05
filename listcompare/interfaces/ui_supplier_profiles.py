@@ -48,6 +48,12 @@ _NAME_MODE_SINGLE = "single"
 _NAME_MODE_COMPOSITE = "composite"
 
 
+def _with_one_based_index(df: pd.DataFrame) -> pd.DataFrame:
+    display_df = df.copy()
+    display_df.index = range(1, len(display_df) + 1)
+    return display_df
+
+
 def _supplier_profile_summary_value(
     target_column: str,
     *,
@@ -230,7 +236,10 @@ def _render_supplier_profile_editor(
                     "Leverantörskolumn": f"Värde från supplier_index: {selected_supplier_name}",
                 }
             )
-            st.dataframe(pd.DataFrame(saved_rows), use_container_width=True)
+            st.dataframe(
+                _with_one_based_index(pd.DataFrame(saved_rows)),
+                use_container_width=True,
+            )
             st.caption(
                 "SKU-regler: "
                 f"ta bort inledande nollor = {'Ja' if saved_profile_options[SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS] else 'Nej'}, "
@@ -294,7 +303,7 @@ def _render_supplier_profile_editor(
         f"({source_preview_rows} f\u00f6rsta raderna med kolumnnamn)"
     )
     st.dataframe(
-        source_preview_df.head(source_preview_rows),
+        _with_one_based_index(source_preview_df.head(source_preview_rows)),
         use_container_width=True,
     )
 
@@ -758,11 +767,11 @@ def _render_supplier_profile_editor(
         )
         + "."
     )
-    st.dataframe(pd.DataFrame(mapping_rows), use_container_width=True)
+    st.dataframe(_with_one_based_index(pd.DataFrame(mapping_rows)), use_container_width=True)
 
     preview_rows = min(len(renamed_df), 20)
     st.caption(f"F\u00f6rhandsvisning av transformerade kolumner ({preview_rows} f\u00f6rsta raderna)")
-    st.dataframe(renamed_df.head(preview_rows), use_container_width=True)
+    st.dataframe(_with_one_based_index(renamed_df.head(preview_rows)), use_container_width=True)
 
 
 
