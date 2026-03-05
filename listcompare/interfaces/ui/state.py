@@ -178,6 +178,9 @@ def _init_session_state() -> None:
         "supplier_prepared_signature": None,
         "supplier_prepared_file_name": None,
         "supplier_prepared_excel_bytes": None,
+        "supplier_ignored_rows_df": None,
+        "supplier_ignored_rows_file_name": None,
+        "supplier_ignored_rows_excel_bytes": None,
         "supplier_prepare_analysis": None,
         "supplier_prepare_resolution_choices": {},
         "excluded_brands": list(ui_settings.get("excluded_brands", [])),
@@ -223,6 +226,9 @@ def _clear_supplier_prepare_state() -> None:
     st.session_state["supplier_prepared_signature"] = None
     st.session_state["supplier_prepared_file_name"] = None
     st.session_state["supplier_prepared_excel_bytes"] = None
+    st.session_state["supplier_ignored_rows_df"] = None
+    st.session_state["supplier_ignored_rows_file_name"] = None
+    st.session_state["supplier_ignored_rows_excel_bytes"] = None
     st.session_state["supplier_prepare_analysis"] = None
     st.session_state["supplier_prepare_resolution_choices"] = {}
 

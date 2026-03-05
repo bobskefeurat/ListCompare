@@ -720,24 +720,6 @@ def _render_supplier_profile_editor(
     if profile_save_success:
         st.success(profile_save_success)
 
-    mapping_rows = [
-        {
-            "HiCore-kolumn": target_column,
-            "Leverant\u00f6rskolumn": _supplier_profile_summary_value(
-                target_column,
-                profile_mapping=current_profile_mapping,
-                profile_composite_fields=current_profile_composite_fields,
-            ),
-        }
-        for target_column in SUPPLIER_HICORE_RENAME_COLUMNS
-        if target_column in current_profile_mapping or target_column in current_profile_composite_fields
-    ]
-    mapping_rows.append(
-        {
-            "HiCore-kolumn": SUPPLIER_HICORE_SUPPLIER_COLUMN,
-            "Leverant\u00f6rskolumn": f"V\u00e4rde fr\u00e5n supplier_index: {selected_supplier_name}",
-        }
-    )
     if missing_target_columns:
         st.success(
             "Delvis kolumnmappning klar. Omatchade HiCore-kolumner utel\u00e4mnas i f\u00f6rhandsvisningen nedan."
@@ -767,8 +749,6 @@ def _render_supplier_profile_editor(
         )
         + "."
     )
-    st.dataframe(_with_one_based_index(pd.DataFrame(mapping_rows)), use_container_width=True)
-
     preview_rows = min(len(renamed_df), 20)
     st.caption(f"F\u00f6rhandsvisning av transformerade kolumner ({preview_rows} f\u00f6rsta raderna)")
     st.dataframe(_with_one_based_index(renamed_df.head(preview_rows)), use_container_width=True)
