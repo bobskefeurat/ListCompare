@@ -19,6 +19,7 @@ from ..supplier_profile_utils import (
     save_supplier_transform_profiles as _save_supplier_transform_profiles,
 )
 from .common import (
+    COMPARE_PAGE_MODE_PRODUCTS,
     FILE_STATE_KEYS,
     SUPPLIER_PAGE_VIEW_COMPARE,
     SUPPLIER_PAGE_VIEW_TRANSFORM,
@@ -163,9 +164,14 @@ def _init_session_state() -> None:
     defaults = {
         FILE_STATE_KEYS["hicore"]: None,
         FILE_STATE_KEYS["magento"]: None,
+        FILE_STATE_KEYS["compare_web_orders_hicore"]: None,
+        FILE_STATE_KEYS["compare_web_orders_magento"]: None,
         FILE_STATE_KEYS["supplier"]: None,
         "compare_ui_result": None,
         "compare_ui_error": None,
+        "web_order_compare_ui_result": None,
+        "web_order_compare_ui_error": None,
+        "compare_page_mode": COMPARE_PAGE_MODE_PRODUCTS,
         "supplier_ui_result": None,
         "supplier_ui_error": None,
         "supplier_prepared_df": None,
@@ -203,6 +209,8 @@ def _init_session_state() -> None:
 def _clear_compare_state() -> None:
     st.session_state["compare_ui_result"] = None
     st.session_state["compare_ui_error"] = None
+    st.session_state["web_order_compare_ui_result"] = None
+    st.session_state["web_order_compare_ui_error"] = None
 
 
 def _clear_supplier_result_state() -> None:

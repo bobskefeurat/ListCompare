@@ -73,6 +73,10 @@ def _read_supplier_csv_upload(data: bytes) -> pd.DataFrame:
         ) from first_error
 
 
+def _read_compare_magento_csv_upload(data: bytes) -> pd.DataFrame:
+    return _read_supplier_csv_upload(data)
+
+
 def _normalize_supplier_names(raw_names: list[str]) -> list[str]:
     unique_by_folded: dict[str, str] = {}
     for raw_name in raw_names:

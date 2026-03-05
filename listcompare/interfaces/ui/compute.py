@@ -18,10 +18,12 @@ from ...core.supplier_products import (
     find_supplier_price_column,
 )
 from ..supplier_profile_utils import SUPPLIER_HICORE_RENAME_COLUMNS
-from .common import CompareUiResult, SupplierUiResult
+from .common import CompareUiResult, SupplierUiResult, WebOrderCompareUiResult
 from .data_io import (
+    _df_csv_bytes,
     _df_excel_bytes,
     _mismatch_map_to_df,
+    _read_compare_magento_csv_upload,
     _normalized_skus_for_excluded_brands,
     _product_map_to_df,
     _sku_csv_bytes,
@@ -69,6 +71,74 @@ def _sort_df_by_sku_column(df: pd.DataFrame, *, sku_column: str) -> pd.DataFrame
     )
     sorted_df = sorted_df.drop(columns=["_lc_sort_sku", "_lc_sort_sku_raw"])
     return sorted_df.reset_index(drop=True)
+
+
+def _normalize_order_number(value: object) -> str:
+    text = _to_clean_text(value)
+    if text == "":
+        return ""
+    return text.lstrip("0")
+
+
+def _empty_web_order_export_bytes() -> bytes:
+    return _df_csv_bytes(pd.DataFrame({"ID": []}))
+
+
+def _build_magento_only_web_orders_result(
+    df_hicore: pd.DataFrame,
+    df_magento: pd.DataFrame,
+) -> tuple[pd.DataFrame, bytes, int, Optional[str]]:
+    hicore_column = _find_case_insensitive_column(df_hicore.columns.tolist(), "Webbordernr")
+    if hicore_column is None:
+        return (
+            pd.DataFrame(columns=df_magento.columns.tolist()),
+            _empty_web_order_export_bytes(),
+            0,
+            'HiCore-filen saknar kolumnen "Webbordernr".',
+        )
+
+    magento_column = _find_case_insensitive_column(df_magento.columns.tolist(), "ID")
+    if magento_column is None:
+        return (
+            pd.DataFrame(columns=df_magento.columns.tolist()),
+            _empty_web_order_export_bytes(),
+            0,
+            'Magento-filen saknar kolumnen "ID".',
+        )
+
+    hicore_order_numbers = {
+        normalized
+        for normalized in df_hicore[hicore_column].map(_normalize_order_number).tolist()
+        if normalized != ""
+    }
+    normalized_magento_order_numbers = df_magento[magento_column].map(_normalize_order_number)
+    missing_order_mask = normalized_magento_order_numbers.map(
+        lambda value: value != "" and value not in hicore_order_numbers
+    )
+    preview_df = df_magento.loc[missing_order_mask].copy().reset_index(drop=True)
+
+    seen_normalized_order_numbers: set[str] = set()
+    export_order_numbers: list[str] = []
+    for raw_order_number, normalized_order_number in zip(
+        df_magento[magento_column].tolist(),
+        normalized_magento_order_numbers.tolist(),
+    ):
+        if normalized_order_number == "":
+            continue
+        if normalized_order_number in hicore_order_numbers:
+            continue
+        if normalized_order_number in seen_normalized_order_numbers:
+            continue
+        seen_normalized_order_numbers.add(normalized_order_number)
+        export_order_numbers.append(_to_clean_text(raw_order_number))
+
+    export_df = pd.DataFrame({magento_column: export_order_numbers})
+    return (
+        preview_df,
+        _df_csv_bytes(export_df),
+        len(export_order_numbers),
+        None,
+    )
 
 
 def _filter_rows_by_normalized_skus(
@@ -138,7 +208,7 @@ def _compute_compare_result(
     excluded_brands: Optional[list[str]] = None,
 ) -> CompareUiResult:
     df_hicore = _uploaded_csv_to_df(hicore_bytes, sep=";")
-    df_magento = _uploaded_csv_to_df(magento_bytes, sep=";")
+    df_magento = _read_compare_magento_csv_upload(magento_bytes)
     hicore_map, magento_map = prepare_data(df_hicore, df_magento)
     excluded_normalized_skus, warning_message = _normalized_skus_for_excluded_brands(
         df_hicore,
@@ -160,6 +230,26 @@ def _compute_compare_result(
         stock_mismatch_csv_bytes=_sku_csv_bytes(stock_skus),
         only_in_magento_count=len(results.only_in_magento),
         stock_mismatch_count=len(results.stock_mismatches),
+        warning_message=warning_message,
+    )
+
+
+def _compute_web_order_compare_result(
+    hicore_bytes: bytes,
+    magento_bytes: bytes,
+) -> WebOrderCompareUiResult:
+    df_hicore = _uploaded_csv_to_df(hicore_bytes, sep=";")
+    df_magento = _read_compare_magento_csv_upload(magento_bytes)
+    (
+        magento_only_web_orders_df,
+        magento_only_web_orders_csv_bytes,
+        magento_only_web_orders_count,
+        warning_message,
+    ) = _build_magento_only_web_orders_result(df_hicore, df_magento)
+    return WebOrderCompareUiResult(
+        magento_only_web_orders_df=magento_only_web_orders_df,
+        magento_only_web_orders_csv_bytes=magento_only_web_orders_csv_bytes,
+        magento_only_web_orders_count=magento_only_web_orders_count,
         warning_message=warning_message,
     )
 

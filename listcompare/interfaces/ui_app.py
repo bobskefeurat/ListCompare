@@ -13,6 +13,8 @@ from .supplier_profile_utils import (
 )
 from .ui.common import (
     BRAND_INDEX_PATH,
+    COMPARE_PAGE_MODE_PRODUCTS,
+    COMPARE_PAGE_MODE_WEB_ORDERS,
     MENU_COMPARE,
     MENU_SETTINGS,
     MENU_SUPPLIER,
@@ -23,8 +25,9 @@ from .ui.common import (
     SUPPLIER_PROFILE_MODE_OVERVIEW,
     UI_SETTINGS_PATH,
     CompareUiResult,
+    WebOrderCompareUiResult,
 )
-from .ui.compute import _compute_compare_result
+from .ui.compute import _compute_compare_result, _compute_web_order_compare_result
 from .ui.data_io import (
     _load_brands_from_index,
     _load_names_from_uploaded_hicore,
@@ -47,7 +50,7 @@ from .ui.state import (
 from .ui_supplier_compare import _render_supplier_compare_tab
 from .ui_supplier_profiles import _render_supplier_transform_tab
 
-def _render_compare_results(result: CompareUiResult) -> None:
+def _render_product_compare_results(result: CompareUiResult) -> None:
     if result.warning_message:
         st.warning(result.warning_message)
 
@@ -78,56 +81,116 @@ def _render_compare_results(result: CompareUiResult) -> None:
         st.dataframe(_style_stock_mismatch_df(result.stock_mismatch_df), use_container_width=True)
 
 
+def _render_web_order_compare_results(result: WebOrderCompareUiResult) -> None:
+    if result.warning_message:
+        st.warning(result.warning_message)
+
+    st.metric("Webborder endast i Magento", result.magento_only_web_orders_count)
+    st.download_button(
+        label="Ladda ner magento_only_web_order_ids.csv",
+        data=result.magento_only_web_orders_csv_bytes,
+        file_name="magento_only_web_order_ids.csv",
+        mime="text/csv",
+        key="download_magento_only_web_orders_csv",
+    )
+    st.dataframe(result.magento_only_web_orders_df, use_container_width=True)
+
+
 def _render_compare_page(*, excluded_brands: list[str]) -> None:
     st.header(MENU_COMPARE)
-    st.caption("Ladda upp filer.")
+    selected_mode = st.radio(
+        "J\u00e4mf\u00f6relsetyp",
+        options=[COMPARE_PAGE_MODE_PRODUCTS, COMPARE_PAGE_MODE_WEB_ORDERS],
+        key="compare_page_mode",
+        horizontal=True,
+    )
 
+    if selected_mode == COMPARE_PAGE_MODE_PRODUCTS:
+        st.caption("Ladda upp produktfiler.")
+        hicore_file = _render_file_input(
+            kind="hicore",
+            label="HiCore produkt-export (.csv)",
+            file_types=["csv"],
+            uploader_key="compare_hicore_uploader",
+        )
+        magento_file = _render_file_input(
+            kind="magento",
+            label="Magento produkt-export (.csv)",
+            file_types=["csv"],
+            uploader_key="compare_magento_uploader",
+        )
+
+        if excluded_brands:
+            shown_brands = excluded_brands[:8]
+            extra_count = len(excluded_brands) - len(shown_brands)
+            suffix = f" (+{extra_count} till)" if extra_count > 0 else ""
+            st.info(
+                f"Exkluderade varum\u00e4rken: {', '.join(shown_brands)}{suffix}."
+            )
+        else:
+            st.caption("Inga varum\u00e4rken exkluderas. \u00c4ndra i Inst\u00e4llningar vid behov.")
+
+        can_run = hicore_file is not None and magento_file is not None
+        if st.button(
+            "K\u00f6r produktj\u00e4mf\u00f6relse",
+            type="primary",
+            disabled=not can_run,
+            key="run_product_compare_button",
+        ):
+            try:
+                result = _compute_compare_result(
+                    hicore_bytes=hicore_file["bytes"],  # type: ignore[index]
+                    magento_bytes=magento_file["bytes"],  # type: ignore[index]
+                    excluded_brands=[str(name) for name in excluded_brands],
+                )
+                st.session_state["compare_ui_result"] = result
+                st.session_state["compare_ui_error"] = None
+            except Exception as exc:
+                st.session_state["compare_ui_result"] = None
+                st.session_state["compare_ui_error"] = str(exc)
+
+        if st.session_state["compare_ui_error"]:
+            st.error(st.session_state["compare_ui_error"])
+        if st.session_state["compare_ui_result"] is not None:
+            _render_product_compare_results(st.session_state["compare_ui_result"])
+        return
+
+    st.caption("Ladda upp webborderfiler.")
     hicore_file = _render_file_input(
-        kind="hicore",
-        label="HiCore-export (.csv)",
+        kind="compare_web_orders_hicore",
+        label="HiCore webborder-export (.csv)",
         file_types=["csv"],
-        uploader_key="compare_hicore_uploader",
+        uploader_key="compare_web_orders_hicore_uploader",
     )
     magento_file = _render_file_input(
-        kind="magento",
-        label="Magento-export (.csv)",
+        kind="compare_web_orders_magento",
+        label="Magento webborder-export (.csv)",
         file_types=["csv"],
-        uploader_key="compare_magento_uploader",
+        uploader_key="compare_web_orders_magento_uploader",
     )
-
-    if excluded_brands:
-        shown_brands = excluded_brands[:8]
-        extra_count = len(excluded_brands) - len(shown_brands)
-        suffix = f" (+{extra_count} till)" if extra_count > 0 else ""
-        st.info(
-            f"Exkluderade varum\u00e4rken: {', '.join(shown_brands)}{suffix}."
-        )
-    else:
-        st.caption("Inga varum\u00e4rken exkluderas. \u00c4ndra i Inst\u00e4llningar vid behov.")
 
     can_run = hicore_file is not None and magento_file is not None
     if st.button(
-        "K\u00f6r J\u00e4mf\u00f6relse",
+        "K\u00f6r orderj\u00e4mf\u00f6relse",
         type="primary",
         disabled=not can_run,
-        key="run_compare_button",
+        key="run_web_order_compare_button",
     ):
         try:
-            result = _compute_compare_result(
+            result = _compute_web_order_compare_result(
                 hicore_bytes=hicore_file["bytes"],  # type: ignore[index]
                 magento_bytes=magento_file["bytes"],  # type: ignore[index]
-                excluded_brands=[str(name) for name in excluded_brands],
             )
-            st.session_state["compare_ui_result"] = result
-            st.session_state["compare_ui_error"] = None
+            st.session_state["web_order_compare_ui_result"] = result
+            st.session_state["web_order_compare_ui_error"] = None
         except Exception as exc:
-            st.session_state["compare_ui_result"] = None
-            st.session_state["compare_ui_error"] = str(exc)
+            st.session_state["web_order_compare_ui_result"] = None
+            st.session_state["web_order_compare_ui_error"] = str(exc)
 
-    if st.session_state["compare_ui_error"]:
-        st.error(st.session_state["compare_ui_error"])
-    if st.session_state["compare_ui_result"] is not None:
-        _render_compare_results(st.session_state["compare_ui_result"])
+    if st.session_state["web_order_compare_ui_error"]:
+        st.error(st.session_state["web_order_compare_ui_error"])
+    if st.session_state["web_order_compare_ui_result"] is not None:
+        _render_web_order_compare_results(st.session_state["web_order_compare_ui_result"])
 
 
 def _render_supplier_page(
