@@ -202,6 +202,11 @@ def _normalized_skus_for_excluded_brands(
 
 
 def _read_supplier_upload(file_name: str, data: bytes) -> pd.DataFrame:
+    return _read_supplier_upload_cached(file_name=file_name, data=data).copy()
+
+
+@st.cache_data(show_spinner=False)
+def _read_supplier_upload_cached(file_name: str, data: bytes) -> pd.DataFrame:
     suffix = Path(file_name).suffix.lower()
     if suffix == ".csv":
         return _read_supplier_csv_upload(data)

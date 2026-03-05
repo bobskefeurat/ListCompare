@@ -268,6 +268,11 @@ def _render_supplier_compare_tab(
             st.session_state["supplier_ui_error"] = None
             update_progress(0.70, "Analyserar dubletter")
 
+            if prepare_analysis.conflicts:
+                # Render conflict resolution UI immediately after first build click.
+                update_progress(1.0, "Klar")
+                _rerun()
+
             if not prepare_analysis.conflicts:
                 update_progress(0.90, "Slutf\u00f6r byggning")
                 ignored_rows_for_export_df = _build_ignored_rows_df(
@@ -339,6 +344,8 @@ def _render_supplier_compare_tab(
                 current_choices[conflict.group_key] = str(selected_candidate_id).strip()
 
         st.session_state["supplier_prepare_resolution_choices"] = current_choices
+        if current_choices != stored_choices:
+            _rerun()
         all_conflicts_resolved = all(
             conflict.group_key in current_choices for conflict in prepare_analysis.conflicts
         )

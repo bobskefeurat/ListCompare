@@ -16,6 +16,12 @@ SUPPLIER_PRICE_COLUMNS = ("UtprisInklMoms",)
 SUPPLIER_NAME_COLUMNS = ("Artikelnamn", "name")
 
 
+def _column_values(df_supplier: pd.DataFrame, column_name: Optional[str]) -> list[object]:
+    if column_name is None or column_name not in df_supplier.columns:
+        return [""] * len(df_supplier.index)
+    return df_supplier[column_name].tolist()
+
+
 def find_supplier_id_column(
     df_supplier: pd.DataFrame,
     *,
@@ -73,17 +79,19 @@ def build_supplier_map(
         df_supplier,
         preferred_columns=preferred_name_columns,
     )
+    id_values = _column_values(df_supplier, id_col)
+    price_values = _column_values(df_supplier, price_col)
+    name_values = _column_values(df_supplier, name_col)
     products: ProductMap = defaultdict(list)
 
-    for _, row in df_supplier.iterrows():
-        raw_sku = row.get(id_col, "")
+    normalize_price_value = normalise_price
+    for raw_sku, raw_price, raw_name in zip(id_values, price_values, name_values):
         if pd.isna(raw_sku):
             continue
 
         sku = str(raw_sku).strip()
         if sku == "" or sku.casefold() == "nan":
             continue
-        raw_name = row.get(name_col, "") if name_col is not None else ""
         name = "" if pd.isna(raw_name) else str(raw_name).strip()
         if name.casefold() == "nan":
             name = ""
@@ -93,7 +101,7 @@ def build_supplier_map(
                 sku=sku,
                 name=name,
                 stock="",
-                price=normalise_price(row.get(price_col, "")),
+                price=normalize_price_value(raw_price),
                 supplier="",
                 source="supplier",
             )
