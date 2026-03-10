@@ -16,6 +16,7 @@ def clear_supplier_result_state(session_state: dict[str, object]) -> None:
 def clear_supplier_prepare_state(session_state: dict[str, object]) -> None:
     session_state["supplier_prepared_df"] = None
     session_state["supplier_prepared_signature"] = None
+    session_state["supplier_prepared_excluded_normalized_skus"] = frozenset()
     session_state["supplier_prepared_file_name"] = None
     session_state["supplier_prepared_excel_bytes"] = None
     session_state["supplier_ignored_rows_df"] = None

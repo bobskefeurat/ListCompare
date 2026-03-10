@@ -22,11 +22,13 @@ def _store_prepared_supplier_df(
     *,
     prepared_df: pd.DataFrame,
     ignored_rows_df: pd.DataFrame,
+    excluded_normalized_skus: frozenset[str],
     prepare_signature: str,
     supplier_name: str,
 ) -> None:
     st.session_state["supplier_prepared_df"] = prepared_df
     st.session_state["supplier_prepared_signature"] = prepare_signature
+    st.session_state["supplier_prepared_excluded_normalized_skus"] = excluded_normalized_skus
     st.session_state["supplier_prepared_file_name"] = _rebuilt_supplier_file_name(supplier_name)
     st.session_state["supplier_prepared_excel_bytes"] = _df_excel_bytes(
         prepared_df,

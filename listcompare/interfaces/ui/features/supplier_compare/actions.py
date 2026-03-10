@@ -155,6 +155,7 @@ def handle_rebuild_supplier_file(
         st.session_state["supplier_prepare_analysis"] = prepare_analysis
         st.session_state["supplier_prepare_resolution_choices"] = {}
         st.session_state["supplier_prepared_df"] = None
+        st.session_state["supplier_prepared_excluded_normalized_skus"] = frozenset()
         st.session_state["supplier_prepared_file_name"] = None
         st.session_state["supplier_prepared_excel_bytes"] = None
         st.session_state["supplier_ignored_rows_df"] = None
@@ -182,6 +183,7 @@ def handle_rebuild_supplier_file(
         _store_prepared_supplier_df(
             prepared_df=prepared_df,
             ignored_rows_df=ignored_rows_for_export_df,
+            excluded_normalized_skus=prepare_analysis.excluded_normalized_skus,
             prepare_signature=current_prepare_signature,
             supplier_name=selected_supplier_name,
         )
@@ -218,6 +220,7 @@ def handle_finalize_supplier_prepare(
         _store_prepared_supplier_df(
             prepared_df=prepared_df,
             ignored_rows_df=ignored_rows_for_export_df,
+            excluded_normalized_skus=prepare_analysis.excluded_normalized_skus,
             prepare_signature=current_prepare_signature,
             supplier_name=selected_supplier_name,
         )
@@ -240,6 +243,7 @@ def handle_run_supplier_compare(
     selected_supplier_name: str,
     prepared_supplier_df: pd.DataFrame,
     excluded_brands: list[str],
+    profile_excluded_normalized_skus: frozenset[str],
 ) -> None:
     update_progress, clear_progress = _build_progress_updater(label="Leverantörsjämförelse")
     update_progress(0.0, "Startar")
@@ -249,6 +253,7 @@ def handle_run_supplier_compare(
             supplier_name=selected_supplier_name,
             supplier_df=prepared_supplier_df,
             excluded_brands=[str(name) for name in excluded_brands],
+            profile_excluded_normalized_skus=set(profile_excluded_normalized_skus),
             progress_callback=update_progress,
         )
         update_progress(1.0, "Klar")

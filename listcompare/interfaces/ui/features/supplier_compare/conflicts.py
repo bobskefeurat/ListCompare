@@ -22,6 +22,16 @@ class ConflictResolutionRenderResult:
     current_choices: dict[str, str]
 
 
+def _ignore_all_conflict_choices(
+    *,
+    prepare_analysis: SupplierPrepareAnalysis,
+) -> dict[str, str]:
+    return {
+        conflict.group_key: SUPPLIER_PREPARE_IGNORE_GROUP
+        for conflict in prepare_analysis.conflicts
+    }
+
+
 def _render_prepare_conflict_group(
     *,
     conflict: SupplierDuplicateConflict,
@@ -49,14 +59,12 @@ def _render_prepare_conflict_group(
 
     with st.expander(expander_label, expanded=not is_resolved):
         candidate_rows: list[dict[str, object]] = []
-        option_label_to_candidate_id: dict[str, str] = {}
-        for candidate_index, candidate in enumerate(conflict.candidates, start=1):
-            option_label = f"Alternativ {candidate_index}"
-            option_label_to_candidate_id[option_label] = candidate.candidate_id
+        candidate_ids_by_row_index: list[str] = []
+        for candidate in conflict.candidates:
+            candidate_ids_by_row_index.append(candidate.candidate_id)
             candidate_rows.append(
                 {
                     "Välj": candidate.candidate_id == stored_choice,
-                    "Alternativ": option_label,
                     **candidate.row_values,
                 }
             )
@@ -72,15 +80,15 @@ def _render_prepare_conflict_group(
         )
 
         selected_candidate_ids: list[str] = []
-        if "Välj" in selected_df.columns and "Alternativ" in selected_df.columns:
-            selected_option_labels = [
-                str(label)
-                for label in selected_df.loc[selected_df["Välj"] == True, "Alternativ"].tolist()
+        if "Välj" in selected_df.columns:
+            selected_row_indexes = [
+                int(index)
+                for index in selected_df.index[selected_df["Välj"] == True].tolist()
             ]
             selected_candidate_ids = [
-                option_label_to_candidate_id[label]
-                for label in selected_option_labels
-                if label in option_label_to_candidate_id
+                candidate_ids_by_row_index[index]
+                for index in selected_row_indexes
+                if 0 <= index < len(candidate_ids_by_row_index)
             ]
 
         button_label = "Ångra ignorering" if ignore_active else "Ignorera grupp"
@@ -123,6 +131,24 @@ def render_conflict_resolution_block(
 
     stored_choices_raw = st.session_state.get("supplier_prepare_resolution_choices", {})
     stored_choices = stored_choices_raw if isinstance(stored_choices_raw, dict) else {}
+    if st.button(
+        "Ignorera alla",
+        type="secondary",
+        key="ignore_all_supplier_prepare_conflicts_button",
+    ):
+        ignore_all_choices = _ignore_all_conflict_choices(prepare_analysis=prepare_analysis)
+        st.session_state["supplier_prepare_resolution_choices"] = ignore_all_choices
+        for conflict in prepare_analysis.conflicts:
+            ignore_key = (
+                f"supplier_prepare_ignore_{current_prepare_signature}_{conflict.group_key}"
+            )
+            st.session_state[ignore_key] = True
+        return ConflictResolutionRenderResult(
+            should_rerun=True,
+            finalize_requested=False,
+            current_choices=ignore_all_choices,
+        )
+
     current_choices: dict[str, str] = {}
     for conflict in prepare_analysis.conflicts:
         selected_candidate_id = _render_prepare_conflict_group(

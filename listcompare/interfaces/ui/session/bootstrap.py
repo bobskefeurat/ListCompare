@@ -33,6 +33,7 @@ def init_session_state(session_state: dict[str, object]) -> None:
         "supplier_ui_error": None,
         "supplier_prepared_df": None,
         "supplier_prepared_signature": None,
+        "supplier_prepared_excluded_normalized_skus": frozenset(),
         "supplier_prepared_file_name": None,
         "supplier_prepared_excel_bytes": None,
         "supplier_ignored_rows_df": None,

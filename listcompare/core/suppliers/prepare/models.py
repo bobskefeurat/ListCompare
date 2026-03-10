@@ -28,3 +28,4 @@ class SupplierPrepareAnalysis:
     exact_duplicate_rows_removed: int
     rows_ready_without_conflicts: pd.DataFrame
     conflicts: tuple[SupplierDuplicateConflict, ...]
+    excluded_normalized_skus: frozenset[str]

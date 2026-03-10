@@ -175,6 +175,44 @@ class SupplierPrepareUtilsTests(unittest.TestCase):
 
         self.assertEqual(prepared_df["Art.m\u00e4rkning"].tolist(), ["200"])
 
+    def test_existing_output_format_applies_brand_filter_and_collects_excluded_skus(self) -> None:
+        df_supplier = pd.DataFrame(
+            [
+                {
+                    "Art.m\u00e4rkning": "100",
+                    "Artikelnamn": "Speaker",
+                    "Varum\u00e4rke": "Sony",
+                    "Leverant\u00f6r": "EM Nordic",
+                },
+                {
+                    "Art.m\u00e4rkning": "500",
+                    "Artikelnamn": "Amp",
+                    "Varum\u00e4rke": " ACME ",
+                    "Leverant\u00f6r": "EM Nordic",
+                },
+            ]
+        )
+
+        analysis = build_supplier_prepare_analysis(
+            df_supplier,
+            supplier_name="EM Nordic",
+            profile_mapping={
+                "Art.m\u00e4rkning": "SupplierSku",
+            },
+            profile_filters={
+                "brand_source_column": "Brand",
+                "excluded_brand_values": ["acme"],
+            },
+        )
+
+        prepared_df = finalize_supplier_prepare_analysis(
+            analysis,
+            selected_candidates={},
+        )
+
+        self.assertEqual(analysis.excluded_normalized_skus, frozenset({"500"}))
+        self.assertEqual(prepared_df["Art.m\u00e4rkning"].tolist(), ["100"])
+
 
 if __name__ == "__main__":
     unittest.main()

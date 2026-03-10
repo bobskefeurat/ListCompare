@@ -138,6 +138,14 @@ def _render_supplier_compare_tab(
 
     stored_prepare_signature = st.session_state.get("supplier_prepared_signature")
     prepared_supplier_df = st.session_state.get("supplier_prepared_df")
+    prepared_excluded_normalized_skus_state = st.session_state.get(
+        "supplier_prepared_excluded_normalized_skus"
+    )
+    prepared_excluded_normalized_skus = (
+        prepared_excluded_normalized_skus_state
+        if isinstance(prepared_excluded_normalized_skus_state, frozenset)
+        else frozenset()
+    )
     prepared_file_name = st.session_state.get("supplier_prepared_file_name")
     prepared_excel_bytes = st.session_state.get("supplier_prepared_excel_bytes")
     ignored_rows_df = st.session_state.get("supplier_ignored_rows_df")
@@ -251,6 +259,7 @@ def _render_supplier_compare_tab(
             selected_supplier_name=selected_supplier_name,
             prepared_supplier_df=prepared_supplier_df,  # type: ignore[arg-type]
             excluded_brands=excluded_brands,
+            profile_excluded_normalized_skus=prepared_excluded_normalized_skus,
         )
 
     st.caption(f"Antal leverantörer: {len(supplier_options)}")

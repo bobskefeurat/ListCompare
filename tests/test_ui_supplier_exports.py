@@ -12,6 +12,9 @@ from listcompare.core.suppliers.profile import (
     SUPPLIER_HICORE_RENAME_COLUMNS,
     SUPPLIER_HICORE_SUPPLIER_COLUMN,
 )
+from listcompare.interfaces.ui.features.supplier_compare.results import (
+    _supplier_compare_export_file_name,
+)
 from listcompare.interfaces.ui.services.supplier_compute import compute_supplier_result
 
 
@@ -32,6 +35,15 @@ def _purchase_column_name() -> str:
 
 
 class SupplierUiExportTests(unittest.TestCase):
+    def test_supplier_compare_export_file_name_includes_supplier_name(self) -> None:
+        self.assertEqual(
+            _supplier_compare_export_file_name(
+                supplier_name="EM Nordic",
+                label="Prisuppdatering, Ej i lager",
+            ),
+            "EM_Nordic_Prisuppdatering_Ej_i_lager.xlsx",
+        )
+
     def test_supplier_exports_use_expected_columns_per_category(self) -> None:
         sku_col = HICORE_COLUMNS["sku"]
         name_col = HICORE_COLUMNS["name"]
@@ -214,6 +226,89 @@ class SupplierUiExportTests(unittest.TestCase):
         self.assertEqual(result.new_products_df["name"].tolist(), ["Headphones Sony"])
         self.assertEqual(result.price_updates_out_of_stock_count, 1)
         self.assertEqual(result.price_updates_out_of_stock_df["sku"].tolist(), ["100", "100"])
+
+    def test_supplier_compare_does_not_mark_profile_excluded_brand_as_outgoing(self) -> None:
+        sku_col = HICORE_COLUMNS["sku"]
+        name_col = HICORE_COLUMNS["name"]
+        brand_col = HICORE_COLUMNS["brand"]
+        supplier_col = HICORE_COLUMNS["supplier"]
+        total_col = HICORE_COLUMNS["total_stock"]
+        reserved_col = HICORE_COLUMNS["reserved"]
+        price_col = HICORE_COLUMNS["price"]
+
+        df_hicore = pd.DataFrame(
+            [
+                {
+                    sku_col: "100",
+                    name_col: "SKU 100",
+                    brand_col: "Sony",
+                    total_col: "0",
+                    reserved_col: "0",
+                    price_col: "10",
+                    supplier_col: "EM Nordic",
+                },
+                {
+                    sku_col: "500",
+                    name_col: "SKU 500",
+                    brand_col: "ACME",
+                    total_col: "0",
+                    reserved_col: "0",
+                    price_col: "30",
+                    supplier_col: "EM Nordic",
+                },
+            ]
+        )
+        hicore_bytes = _to_csv_bytes(df_hicore)
+
+        df_supplier = pd.DataFrame(
+            [
+                {
+                    "SupplierSku": "100",
+                    "Short Description": "Speaker",
+                    "Brand": "Sony",
+                    "Cost": "5",
+                    "Price": "11",
+                },
+                {
+                    "SupplierSku": "500",
+                    "Short Description": "Amp",
+                    "Brand": " ACME ",
+                    "Cost": "9",
+                    "Price": "30",
+                },
+            ]
+        )
+        prepare_analysis = build_supplier_prepare_analysis(
+            df_supplier,
+            supplier_name="EM Nordic",
+            profile_mapping={
+                "Art.m\u00e4rkning": "SupplierSku",
+                "Varum\u00e4rke": "Brand",
+                "Ink\u00f6pspris": "Cost",
+                "UtprisInklMoms": "Price",
+            },
+            profile_composite_fields={
+                "Artikelnamn": ["Short Description", "Brand"],
+            },
+            profile_filters={
+                "brand_source_column": "Brand",
+                "excluded_brand_values": ["acme"],
+            },
+        )
+        prepared_supplier_df = finalize_supplier_prepare_analysis(
+            prepare_analysis,
+            selected_candidates={},
+        )
+
+        result = compute_supplier_result(
+            hicore_bytes=hicore_bytes,
+            supplier_name="EM Nordic",
+            supplier_df=prepared_supplier_df,
+            profile_excluded_normalized_skus=set(prepare_analysis.excluded_normalized_skus),
+        )
+
+        self.assertEqual(result.outgoing_count, 0)
+        self.assertTrue(result.outgoing_df.empty)
 
 
 if __name__ == "__main__":

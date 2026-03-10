@@ -77,6 +77,7 @@ def compute_supplier_result(
     supplier_name: str,
     supplier_df: pd.DataFrame,
     excluded_brands: Optional[list[str]] = None,
+    profile_excluded_normalized_skus: Optional[set[str]] = None,
     progress_callback: Optional[ProgressCallback] = None,
 ) -> SupplierUiResult:
     _notify_progress(progress_callback, 0.05, "Läser HiCore-fil")
@@ -92,6 +93,12 @@ def compute_supplier_result(
         df_hicore,
         excluded_brands or [],
     )
+    combined_excluded_normalized_skus = {
+        sku
+        for sku in (profile_excluded_normalized_skus or set())
+        if str(sku).strip() != ""
+    }
+    combined_excluded_normalized_skus.update(excluded_normalized_skus)
     _notify_progress(progress_callback, 0.35, "Förbereder leverantörsdata")
     df_supplier = supplier_df.copy()
     supplier_source_columns = [str(column).strip() for column in df_supplier.columns]
@@ -108,7 +115,7 @@ def compute_supplier_result(
         hicore_map,
         supplier_map,
         supplier_internal_name=supplier_name,
-        excluded_normalized_skus=excluded_normalized_skus,
+        excluded_normalized_skus=combined_excluded_normalized_skus,
     )
 
     _notify_progress(progress_callback, 0.74, "Bygger export för utgående och nyheter")

@@ -4,6 +4,8 @@ from typing import Optional
 
 import pandas as pd
 
+from ...products.product_filters import normalized_skus_from_brand_filter
+from ...products.product_schema import HICORE_COLUMNS
 from ...products.product_diff import normalize_sku
 from ..profile import (
     SUPPLIER_HICORE_RENAME_COLUMNS,
@@ -59,6 +61,57 @@ def _canonicalize_prepared_output_df(df_supplier: pd.DataFrame) -> pd.DataFrame:
     return canonical_df.reset_index(drop=True)
 
 
+def _profile_excluded_normalized_skus(
+    df_supplier: pd.DataFrame,
+    *,
+    profile_mapping: dict[str, str],
+    profile_filters: dict[str, object],
+    file_matches_output_format: bool,
+) -> set[str]:
+    excluded_brand_values = [
+        str(value)
+        for value in profile_filters[SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES]
+        if str(value).strip() != ""
+    ]
+    if not excluded_brand_values:
+        return set()
+
+    configured_brand_source = str(
+        profile_filters[SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN]
+    ).strip()
+    if file_matches_output_format:
+        brand_column = configured_brand_source if configured_brand_source in df_supplier.columns else None
+        fallback_brand_column = HICORE_COLUMNS.get("brand")
+        if brand_column is None and fallback_brand_column in df_supplier.columns:
+            brand_column = fallback_brand_column
+        sku_column = SUPPLIER_HICORE_SKU_COLUMN
+    else:
+        brand_column = configured_brand_source or None
+        sku_column = str(profile_mapping.get(SUPPLIER_HICORE_SKU_COLUMN, "")).strip()
+
+    excluded_normalized_skus, _missing_brand_column = normalized_skus_from_brand_filter(
+        df_supplier,
+        selected_brands=excluded_brand_values,
+        brand_column=brand_column,
+        sku_column=sku_column,
+    )
+    return excluded_normalized_skus
+
+
+def _filter_prepared_df_by_excluded_normalized_skus(
+    prepared_df: pd.DataFrame,
+    *,
+    excluded_normalized_skus: set[str],
+) -> pd.DataFrame:
+    if not excluded_normalized_skus or SUPPLIER_HICORE_SKU_COLUMN not in prepared_df.columns:
+        return prepared_df
+
+    keep_rows = prepared_df[SUPPLIER_HICORE_SKU_COLUMN].map(
+        lambda raw_value: normalize_sku(_prepared_value_text(raw_value)) not in excluded_normalized_skus
+    )
+    return prepared_df.loc[keep_rows].copy()
+
+
 def _candidate_signature(
     row_values: dict[str, str],
     *,
@@ -96,11 +149,18 @@ def build_supplier_prepare_analysis(
     )
 
     source_columns = [str(column).strip() for column in df_supplier.columns]
-    if matches_profile_output_format(
+    file_matches_output_format = matches_profile_output_format(
         normalized_profile_mapping,
         source_columns,
         composite_fields=normalized_profile_composite_fields,
-    ):
+    )
+    excluded_normalized_skus = _profile_excluded_normalized_skus(
+        df_supplier,
+        profile_mapping=normalized_profile_mapping,
+        profile_filters=normalized_profile_filters,
+        file_matches_output_format=file_matches_output_format,
+    )
+    if file_matches_output_format:
         prepared_df = _canonicalize_prepared_output_df(df_supplier)
     else:
         missing_columns = missing_profile_source_columns(
@@ -137,6 +197,10 @@ def build_supplier_prepare_analysis(
             ],
             source_row_column=_SOURCE_ROW_COLUMN,
         )
+    prepared_df = _filter_prepared_df_by_excluded_normalized_skus(
+        prepared_df,
+        excluded_normalized_skus=excluded_normalized_skus,
+    )
 
     output_columns = [
         column_name
@@ -228,4 +292,5 @@ def build_supplier_prepare_analysis(
         exact_duplicate_rows_removed=exact_duplicate_rows_removed,
         rows_ready_without_conflicts=rows_ready_without_conflicts,
         conflicts=tuple(conflicts),
+        excluded_normalized_skus=frozenset(excluded_normalized_skus),
     )

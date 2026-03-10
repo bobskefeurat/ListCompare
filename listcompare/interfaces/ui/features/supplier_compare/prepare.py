@@ -32,14 +32,7 @@ def _build_ignored_rows_df(
         if str(group_key).strip() != "" and str(candidate_id).strip() != ""
     }
     output_columns = list(analysis.output_columns)
-    ignored_columns = [
-        "Konfliktgrupp",
-        "KonfliktSKU",
-        "Ignoreringsorsak",
-        "Kallrad",
-        *output_columns,
-    ]
-    ignored_rows: list[dict[str, object]] = []
+    ignored_rows: list[tuple[int, dict[str, object]]] = []
 
     for conflict in analysis.conflicts:
         selected_candidate_id = selected_by_group.get(conflict.group_key, "")
@@ -47,31 +40,24 @@ def _build_ignored_rows_df(
             continue
         if selected_candidate_id == SUPPLIER_PREPARE_IGNORE_GROUP:
             ignored_candidates = tuple(conflict.candidates)
-            ignored_reason = "Ignorerad grupp"
         else:
             ignored_candidates = tuple(
                 candidate
                 for candidate in conflict.candidates
                 if candidate.candidate_id != selected_candidate_id
             )
-            ignored_reason = "Ej valt alternativ"
 
         for candidate in ignored_candidates:
             for source_row_number in candidate.source_row_numbers:
-                ignored_row: dict[str, object] = {
-                    "Konfliktgrupp": conflict.group_key,
-                    "KonfliktSKU": str(conflict.sku).strip(),
-                    "Ignoreringsorsak": ignored_reason,
-                    "Kallrad": int(source_row_number),
-                }
+                ignored_row: dict[str, object] = {}
                 for column_name in output_columns:
                     ignored_row[column_name] = candidate.row_values.get(column_name, "")
-                ignored_rows.append(ignored_row)
+                ignored_rows.append((int(source_row_number), ignored_row))
 
     if not ignored_rows:
-        return pd.DataFrame(columns=ignored_columns)
+        return pd.DataFrame(columns=output_columns)
 
-    ignored_df = pd.DataFrame(ignored_rows, columns=ignored_columns)
-    ignored_df = ignored_df.sort_values(by=["Kallrad", "Konfliktgrupp"], kind="stable")
+    sorted_rows = [row for _source_row, row in sorted(ignored_rows, key=lambda item: item[0])]
+    ignored_df = pd.DataFrame(sorted_rows, columns=output_columns)
     return ignored_df.reset_index(drop=True)
 
