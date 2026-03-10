@@ -1,6 +1,6 @@
 import unittest
 
-from listcompare.interfaces.supplier_profile_utils import (
+from listcompare.core.suppliers.profile import (
     SUPPLIER_HICORE_SKU_COLUMN,
 )
 from listcompare.interfaces.ui.persistence import (

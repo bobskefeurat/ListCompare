@@ -1,12 +1,12 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Optional
 
 import pandas as pd
 
-from ...core.product_diff import normalize_sku
-from ..supplier_profile_utils import SUPPLIER_HICORE_RENAME_COLUMNS
+from ...core.products.product_diff import normalize_sku
+from ...core.suppliers.profile import SUPPLIER_HICORE_RENAME_COLUMNS
 
 ProgressCallback = Callable[[float, str], None]
 
@@ -62,3 +62,4 @@ def _sort_df_by_sku_column(df: pd.DataFrame, *, sku_column: str) -> pd.DataFrame
     )
     sorted_df = sorted_df.drop(columns=["_lc_sort_sku", "_lc_sort_sku_raw"])
     return sorted_df.reset_index(drop=True)
+

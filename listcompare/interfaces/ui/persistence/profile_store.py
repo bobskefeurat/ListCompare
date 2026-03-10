@@ -1,16 +1,24 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Optional
 
-from ...supplier_profile_utils import (
-    load_supplier_transform_profiles as _load_supplier_transform_profiles,
-    save_supplier_transform_profiles as _save_supplier_transform_profiles,
+from ....core.suppliers.profile import (
+    build_profiles_payload as _build_profiles_payload,
+    parse_profiles_payload as _parse_profiles_payload,
 )
 
 
 def load_profiles(path: Path) -> tuple[dict[str, dict[str, object]], Optional[str]]:
-    return _load_supplier_transform_profiles(path)
+    if not path.exists():
+        return {}, None
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8-sig"))
+        return _parse_profiles_payload(raw), None
+    except Exception as exc:
+        return {}, str(exc)
 
 
 def save_profiles(
@@ -18,4 +26,9 @@ def save_profiles(
     *,
     profiles: dict[str, dict[str, object]],
 ) -> Optional[str]:
-    return _save_supplier_transform_profiles(path, profiles=profiles)
+    payload = _build_profiles_payload(profiles)
+    try:
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return None
+    except Exception as exc:
+        return str(exc)

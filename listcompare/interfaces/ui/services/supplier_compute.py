@@ -4,20 +4,24 @@ from typing import Optional
 
 import pandas as pd
 
-from ...core.comparison_use_cases import (
+from ....core.comparison.use_cases import (
     build_supplier_comparison_results,
     unique_sorted_skus_from_product_map,
 )
-from ...core.product_diff import ProductMap, normalize_sku
-from ...core.product_mapping import build_product_map
-from ...core.product_schema import HICORE_COLUMNS
-from ...core.supplier_products import (
+from ....core.products.product_diff import normalize_sku
+from ....core.products.product_mapping import build_product_map
+from ....core.products.product_schema import HICORE_COLUMNS
+from ....core.suppliers.supplier_products import (
     build_supplier_map,
     find_supplier_id_column,
     find_supplier_price_column,
 )
-from .common import SupplierUiResult
-from .compute_shared import (
+from ....core.suppliers.supplier_selection import (
+    filter_rows_by_normalized_skus,
+    normalized_skus_from_product_map,
+)
+from ..common import SupplierUiResult
+from ..compute_shared import (
     ProgressCallback,
     _find_case_insensitive_column,
     _hicore_purchase_column_name,
@@ -25,37 +29,10 @@ from .compute_shared import (
     _sort_df_by_sku_column,
     _to_clean_text,
 )
-from .data_io import (
-    _df_excel_bytes,
-    _mismatch_map_to_df,
-    _normalized_skus_for_excluded_brands,
-    _product_map_to_df,
-    _uploaded_csv_to_df,
-)
-
-
-def _filter_rows_by_normalized_skus(
-    df_supplier: pd.DataFrame,
-    *,
-    sku_column: str,
-    normalized_skus: set[str],
-) -> pd.DataFrame:
-    if sku_column not in df_supplier.columns or not normalized_skus:
-        return df_supplier.iloc[0:0].copy()
-
-    normalized_series = df_supplier[sku_column].map(
-        lambda value: normalize_sku(_to_clean_text(value))
-    )
-    return df_supplier.loc[normalized_series.isin(normalized_skus)].copy()
-
-
-def _normalized_skus_from_product_map(product_map: ProductMap) -> set[str]:
-    normalized_skus: set[str] = set()
-    for sku in product_map.keys():
-        normalized = normalize_sku(str(sku))
-        if normalized != "":
-            normalized_skus.add(normalized)
-    return normalized_skus
+from ..io.brand_filter import _normalized_skus_for_excluded_brands
+from ..io.exports import _df_excel_bytes
+from ..io.tables import _mismatch_map_to_df, _product_map_to_df
+from ..io.uploads import _uploaded_csv_to_df
 
 
 def _build_supplier_price_export_df(
@@ -75,7 +52,7 @@ def _build_supplier_price_export_df(
         export_columns.append(purchase_column_name)
     export_columns.append(price_column_name)
 
-    filtered_rows = _filter_rows_by_normalized_skus(
+    filtered_rows = filter_rows_by_normalized_skus(
         df_supplier,
         sku_column=id_column,
         normalized_skus=normalized_skus,
@@ -94,7 +71,7 @@ def _build_supplier_price_export_df(
     return _sort_df_by_sku_column(export_df, sku_column=sku_column_name)
 
 
-def _compute_supplier_result(
+def compute_supplier_result(
     hicore_bytes: bytes,
     *,
     supplier_name: str,
@@ -145,9 +122,9 @@ def _compute_supplier_result(
         }
     )
 
-    new_products_normalized_skus = _normalized_skus_from_product_map(results.new_products)
+    new_products_normalized_skus = normalized_skus_from_product_map(results.new_products)
     new_products_export_df = _sort_df_by_sku_column(
-        _filter_rows_by_normalized_skus(
+        filter_rows_by_normalized_skus(
             df_supplier,
             sku_column=id_column,
             normalized_skus=new_products_normalized_skus,

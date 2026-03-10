@@ -1,0 +1,1 @@
+﻿"""Supplier compare feature package."""

@@ -1,7 +1,11 @@
 import unittest
 
-from listcompare.core.product_diff import find_field_mismatches_by_sku, find_missing_skus, normalize_sku
-from listcompare.core.product_schema import Product
+from listcompare.core.products.product_diff import (
+    find_field_mismatches_by_sku,
+    find_missing_skus,
+    normalize_sku,
+)
+from listcompare.core.products.product_schema import Product
 
 
 def make_product(

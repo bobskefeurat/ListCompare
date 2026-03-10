@@ -1,6 +1,6 @@
 import unittest
 
-from listcompare.core.comparison_use_cases import (
+from listcompare.core.comparison.use_cases import (
     build_comparison_results,
     build_supplier_comparison_results,
     filter_product_map_by_excluded_normalized_skus,
@@ -8,7 +8,7 @@ from listcompare.core.comparison_use_cases import (
     unique_sorted_skus_from_mismatch_side,
     unique_sorted_skus_from_product_map,
 )
-from listcompare.core.product_schema import Product
+from listcompare.core.products.product_schema import Product
 
 
 def make_product(

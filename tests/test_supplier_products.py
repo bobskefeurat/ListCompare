@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from listcompare.core.supplier_products import (
+from listcompare.core.suppliers.supplier_products import (
     build_supplier_map,
     find_supplier_id_column,
     find_supplier_name_column,

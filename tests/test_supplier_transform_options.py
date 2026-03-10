@@ -2,15 +2,15 @@ import unittest
 
 import pandas as pd
 
-from listcompare.interfaces.supplier_profile_utils import (
-    load_supplier_transform_profiles,
-    save_supplier_transform_profiles,
+from listcompare.interfaces.ui.persistence.profile_store import (
+    load_profiles,
+    save_profiles,
 )
-from listcompare.interfaces.ui.app import (
-    _build_supplier_hicore_renamed_copy,
-    _matches_profile_output_format,
-    _missing_profile_source_columns,
-    _profile_has_required_sku_mapping,
+from listcompare.core.suppliers.profile import (
+    build_supplier_hicore_renamed_copy as _build_supplier_hicore_renamed_copy,
+    matches_profile_output_format as _matches_profile_output_format,
+    missing_profile_source_columns as _missing_profile_source_columns,
+    profile_has_required_sku_mapping as _profile_has_required_sku_mapping,
 )
 
 
@@ -189,7 +189,7 @@ class SupplierTransformOptionTests(unittest.TestCase):
                 return self._text
 
         profile_path = _InMemoryPath()
-        save_error = save_supplier_transform_profiles(
+        save_error = save_profiles(
             profile_path,
             profiles={
                 "EM Nordic": {
@@ -214,7 +214,7 @@ class SupplierTransformOptionTests(unittest.TestCase):
 
         self.assertIsNone(save_error)
 
-        loaded_profiles, load_error = load_supplier_transform_profiles(profile_path)
+        loaded_profiles, load_error = load_profiles(profile_path)
 
         self.assertIsNone(load_error)
         self.assertEqual(

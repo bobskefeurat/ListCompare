@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from listcompare.interfaces.supplier_prepare_utils import (
+from listcompare.core.suppliers.prepare import (
     SUPPLIER_PREPARE_IGNORE_GROUP,
     build_supplier_prepare_analysis,
     finalize_supplier_prepare_analysis,

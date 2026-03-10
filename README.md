@@ -2,19 +2,30 @@
 
 The project is organized into a clear package structure:
 
-- `listcompare/core`: domain logic (products, diff, use cases, supplier logic)
-  - `product_schema.py`: product dataclass and source column schemas
-  - `product_normalization.py`: stock/price/string normalization
-  - `product_mapping.py`: product map building and source preparation
+- `listcompare/core`: domain logic grouped by subdomain
+  - `products/`: product schema, normalization, mapping, diff and related helpers
+  - `suppliers/`: supplier parsing, selection and product map helpers
+    - `profile/`: profile schema/normalization, validation, transformation and payload helpers
+    - `prepare/`: prepare signature, duplicate/conflict analysis and finalize logic
+  - `comparison/`: comparison use cases and result composition
+  - `orders/`: web order compare logic
 - `listcompare/interfaces`: Streamlit UI
   - `ui/`: internal UI modules
-    - `app.py`: app router (menu/page flow)
+    - `app.py`: app bootstrap/router
     - `common.py`: shared constants and UI result dataclasses
-    - `state.py`: session state helpers
-    - `data_io.py`: CSV/Excel/index IO and table conversion helpers
-    - `compute_compare.py`: compare + web order compute flows
-    - `compute_supplier.py`: supplier compare compute flow
     - `compute_shared.py`: shared compute helpers
+    - `pages/compare.py`: compare page rendering
+    - `pages/supplier.py`: supplier page rendering
+    - `pages/settings.py`: settings page rendering
+    - `services/compare_compute.py`: compare + web order orchestration
+    - `services/supplier_compute.py`: supplier compare orchestration
+    - `services/index_sync.py`: HiCore-driven supplier/brand index sync
+    - `session/file_inputs.py`: file upload state + input rendering helpers
+    - `session/bootstrap.py`: session default initialization
+    - `session/navigation.py`: rerun/navigation helpers
+    - `session/supplier_selection.py`: selection normalization/sync
+    - `session/profile_state.py`: supplier profile persistence orchestration
+    - `io/*`: focused upload/index/filter/table/export adapters
     - `persistence/index_store.py`: supplier/brand index persistence
     - `persistence/settings_store.py`: UI settings persistence
     - `persistence/profile_store.py`: supplier profile persistence

@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+from ..common import (
+    COMPARE_PAGE_MODE_PRODUCTS,
+    FILE_STATE_KEYS,
+    SUPPLIER_PAGE_VIEW_COMPARE,
+    SUPPLIER_PROFILE_MODE_OVERVIEW,
+    SUPPLIER_TRANSFORM_PROFILES_PATH,
+    UI_SETTINGS_PATH,
+)
+from ..persistence import profile_store as _profile_store
+from .settings_state import load_ui_settings
+
+
+def init_session_state(session_state: dict[str, object]) -> None:
+    ui_settings, ui_settings_error = load_ui_settings(UI_SETTINGS_PATH)
+    supplier_transform_profiles, supplier_transform_profiles_error = _profile_store.load_profiles(
+        SUPPLIER_TRANSFORM_PROFILES_PATH
+    )
+
+    defaults: dict[str, object] = {
+        FILE_STATE_KEYS["hicore"]: None,
+        FILE_STATE_KEYS["magento"]: None,
+        FILE_STATE_KEYS["compare_web_orders_hicore"]: None,
+        FILE_STATE_KEYS["compare_web_orders_magento"]: None,
+        FILE_STATE_KEYS["supplier"]: None,
+        "compare_ui_result": None,
+        "compare_ui_error": None,
+        "web_order_compare_ui_result": None,
+        "web_order_compare_ui_error": None,
+        "compare_page_mode": COMPARE_PAGE_MODE_PRODUCTS,
+        "supplier_ui_result": None,
+        "supplier_ui_error": None,
+        "supplier_prepared_df": None,
+        "supplier_prepared_signature": None,
+        "supplier_prepared_file_name": None,
+        "supplier_prepared_excel_bytes": None,
+        "supplier_ignored_rows_df": None,
+        "supplier_ignored_rows_file_name": None,
+        "supplier_ignored_rows_excel_bytes": None,
+        "supplier_prepare_analysis": None,
+        "supplier_prepare_resolution_choices": {},
+        "excluded_brands": list(ui_settings.get("excluded_brands", [])),
+        "supplier_internal_name": None,
+        "supplier_transform_internal_name": None,
+        "_last_supplier_internal_name": None,
+        "ui_settings_load_error": ui_settings_error,
+        "ui_settings_save_error": None,
+        "supplier_transform_profiles": dict(supplier_transform_profiles),
+        "supplier_transform_profiles_load_error": supplier_transform_profiles_error,
+        "supplier_transform_profiles_save_error": None,
+        "supplier_page_view": SUPPLIER_PAGE_VIEW_COMPARE,
+        "supplier_page_view_last_rendered": SUPPLIER_PAGE_VIEW_COMPARE,
+        "supplier_page_view_request": None,
+        "supplier_profiles_mode": SUPPLIER_PROFILE_MODE_OVERVIEW,
+        "supplier_profiles_mode_request": None,
+        "supplier_profiles_supplier_request": None,
+        "supplier_profiles_active_supplier": None,
+        "supplier_profiles_search_query": "",
+        "supplier_profiles_delete_confirm": False,
+        "supplier_transform_attention_required": False,
+        "supplier_compare_info_message": None,
+    }
+    for key, value in defaults.items():
+        if key not in session_state:
+            session_state[key] = value

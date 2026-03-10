@@ -2,14 +2,14 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from .product_diff import (
+from ..products.product_diff import (
     ProductMap,
     build_normalized_map,
     find_field_mismatches_by_sku,
     find_missing_skus,
     normalize_sku,
 )
-from .product_schema import Product
+from ..products.product_schema import Product
 
 MismatchMap = dict[str, dict[str, list[Product]]]
 

@@ -1,6 +1,10 @@
 import unittest
 
-from listcompare.core.product_normalization import compute_hicore_stock, normalise_price, normalise_stock
+from listcompare.core.products.product_normalization import (
+    compute_hicore_stock,
+    normalise_price,
+    normalise_stock,
+)
 
 
 class ProductNormalizationTests(unittest.TestCase):

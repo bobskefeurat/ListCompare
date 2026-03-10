@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from ...common import SupplierUiResult
-from ...data_io import _style_stock_mismatch_df
+from ...io.tables import _style_stock_mismatch_df
 from ...shared.presentation import with_one_based_index as _with_one_based_index
 
 

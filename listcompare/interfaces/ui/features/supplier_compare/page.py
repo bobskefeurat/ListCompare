@@ -1,48 +1,45 @@
 ﻿from __future__ import annotations
 
 from typing import Optional
-
-import pandas as pd
 import streamlit as st
 
-from ....supplier_prepare_utils import (
+from listcompare.core.suppliers.prepare import (
     SupplierPrepareAnalysis,
-    build_supplier_prepare_analysis as _build_supplier_prepare_analysis,
-    finalize_supplier_prepare_analysis as _finalize_supplier_prepare_analysis,
-    supplier_prepare_signature as _supplier_prepare_signature,
 )
-from ....supplier_profile_utils import (
+from listcompare.core.suppliers.profile import (
     SUPPLIER_HICORE_SKU_COLUMN,
-    matches_profile_output_format as _matches_profile_output_format,
-    missing_profile_source_columns as _missing_profile_source_columns,
     profile_has_required_sku_mapping as _profile_has_required_sku_mapping,
 )
 from ...common import SUPPLIER_INDEX_PATH
-from ...compute_supplier import _compute_supplier_result
-from ...data_io import _read_supplier_upload
-from ...shared.presentation import (
-    build_progress_updater as _build_progress_updater,
-    with_one_based_index as _with_one_based_index,
+from ...session.file_inputs import render_file_input as _render_file_input
+from ...session.navigation import (
+    request_supplier_profile_editor as _request_supplier_profile_editor,
+    rerun as _rerun,
 )
-from ...state import (
-    _clear_supplier_prepare_state,
-    _clear_supplier_result_state,
-    _clear_supplier_state,
-    _get_supplier_transform_profile_details,
-    _normalize_selected_supplier_for_options,
-    _render_file_input,
-    _request_supplier_profile_editor,
-    _rerun,
-    _sync_selected_supplier_between_views,
+from ...session.profile_access import (
+    get_supplier_transform_profile_details as _get_supplier_transform_profile_details,
 )
-from .prepare import (
-    _build_ignored_rows_df,
-    _prepared_supplier_success_message,
-    _render_prepare_conflict_group,
-    _store_prepared_supplier_df,
-    _sync_supplier_prepare_state,
+from ...session.run_state import clear_supplier_state as _clear_supplier_state
+from ...session.supplier_selection import (
+    normalize_selected_supplier_for_options as _normalize_selected_supplier_for_options,
+    sync_selected_supplier_between_views as _sync_selected_supplier_between_views,
+)
+from .prepare_state import _sync_supplier_prepare_state
+from .actions import (
+    build_prepare_signature as _build_prepare_signature,
+    evaluate_uploaded_supplier_file as _evaluate_uploaded_supplier_file,
+    handle_finalize_supplier_prepare as _handle_finalize_supplier_prepare,
+    handle_rebuild_supplier_file as _handle_rebuild_supplier_file,
+    handle_run_supplier_compare as _handle_run_supplier_compare,
 )
 from .results import _render_supplier_results
+from .view_model import (
+    build_supplier_compare_flags as _build_supplier_compare_flags,
+    profile_status_message as _profile_status_message,
+    supplier_file_status_message as _supplier_file_status_message,
+)
+from .conflicts import render_conflict_resolution_block as _render_conflict_resolution_block
+from .downloads import render_prepared_supplier_downloads as _render_prepared_supplier_downloads
 
 def _render_supplier_compare_tab(
     *,
@@ -59,12 +56,14 @@ def _render_supplier_compare_tab(
         st.session_state["supplier_internal_name"] = normalized_compare_supplier
 
     hicore_file = _render_file_input(
+        session_state=st.session_state,
         kind="hicore",
         label="HiCore-export (.csv)",
         file_types=["csv"],
         uploader_key="supplier_hicore_uploader",
     )
     supplier_file = _render_file_input(
+        session_state=st.session_state,
         kind="supplier",
         label="Leverantörsfil (.csv/.xlsx/.xls/.xlsm)",
         file_types=["csv", "xlsx", "xls", "xlsm"],
@@ -85,7 +84,7 @@ def _render_supplier_compare_tab(
     )
     if previous_supplier_name != supplier_internal_name:
         st.session_state["_last_supplier_internal_name"] = supplier_internal_name
-        _clear_supplier_state()
+        _clear_supplier_state(st.session_state)
     selected_supplier_name = (
         str(supplier_internal_name).strip() if supplier_internal_name is not None else ""
     )
@@ -96,13 +95,14 @@ def _render_supplier_compare_tab(
             selected_supplier_name if selected_supplier_name != "" else None
         )
     _sync_selected_supplier_between_views(
+        st.session_state,
         selected_supplier_name if selected_supplier_name != "" else None,
         supplier_options,
         target_key="supplier_transform_internal_name",
     )
 
     profile_mapping, profile_composite_fields, profile_filters, profile_options = (
-        _get_supplier_transform_profile_details(selected_supplier_name)
+        _get_supplier_transform_profile_details(st.session_state, selected_supplier_name)
     )
     profile_exists = bool(profile_mapping)
     profile_has_required_sku = _profile_has_required_sku_mapping(profile_mapping)
@@ -111,49 +111,29 @@ def _render_supplier_compare_tab(
         selected_supplier_name != "" and not profile_ready
     )
 
-    supplier_file_read_error: Optional[str] = None
-    profile_matches_uploaded_file = False
-    file_matches_profile_output_format = False
-    missing_profile_columns_for_file: list[str] = []
-    df_supplier_uploaded: Optional[pd.DataFrame] = None
-    if supplier_file is not None:
-        supplier_file_name = str(supplier_file["name"])  # type: ignore[index]
-        supplier_bytes = supplier_file["bytes"]  # type: ignore[index]
-        try:
-            df_supplier_uploaded = _read_supplier_upload(supplier_file_name, supplier_bytes)
-            source_columns = [str(column).strip() for column in df_supplier_uploaded.columns]
-            if profile_ready:
-                missing_profile_columns_for_file = _missing_profile_source_columns(
-                    profile_mapping,
-                    source_columns,
-                    composite_fields=profile_composite_fields,
-                    filters=profile_filters,
-                )
-                profile_matches_uploaded_file = len(missing_profile_columns_for_file) == 0
-                file_matches_profile_output_format = _matches_profile_output_format(
-                    profile_mapping,
-                    source_columns,
-                    composite_fields=profile_composite_fields,
-                )
-        except Exception as exc:
-            supplier_file_read_error = str(exc)
+    uploaded_eval = _evaluate_uploaded_supplier_file(
+        supplier_file=supplier_file,
+        profile_ready=profile_ready,
+        profile_mapping=profile_mapping,
+        profile_composite_fields=profile_composite_fields,
+        profile_filters=profile_filters,
+    )
+    supplier_file_read_error = uploaded_eval.supplier_file_read_error
+    profile_matches_uploaded_file = uploaded_eval.profile_matches_uploaded_file
+    file_matches_profile_output_format = uploaded_eval.file_matches_profile_output_format
+    missing_profile_columns_for_file = uploaded_eval.missing_profile_columns_for_file
+    df_supplier_uploaded = uploaded_eval.df_supplier_uploaded
 
-    current_prepare_signature: Optional[str] = None
-    if (
-        supplier_file is not None
-        and selected_supplier_name != ""
-        and profile_ready
-        and supplier_file_read_error is None
-    ):
-        current_prepare_signature = _supplier_prepare_signature(
-            supplier_name=selected_supplier_name,
-            supplier_file_name=str(supplier_file["name"]),  # type: ignore[index]
-            supplier_bytes=supplier_file["bytes"],  # type: ignore[index]
-            profile_mapping=profile_mapping,
-            profile_composite_fields=profile_composite_fields,
-            profile_filters=profile_filters,
-            profile_options=profile_options,
-        )
+    current_prepare_signature = _build_prepare_signature(
+        supplier_file=supplier_file,
+        selected_supplier_name=selected_supplier_name,
+        profile_ready=profile_ready,
+        supplier_file_read_error=supplier_file_read_error,
+        profile_mapping=profile_mapping,
+        profile_composite_fields=profile_composite_fields,
+        profile_filters=profile_filters,
+        profile_options=profile_options,
+    )
     _sync_supplier_prepare_state(current_prepare_signature)
 
     stored_prepare_signature = st.session_state.get("supplier_prepared_signature")
@@ -169,274 +149,109 @@ def _render_supplier_compare_tab(
         if isinstance(prepare_analysis_state, SupplierPrepareAnalysis)
         else None
     )
-    has_prepared_supplier_df = (
-        current_prepare_signature is not None
-        and stored_prepare_signature == current_prepare_signature
-        and isinstance(prepared_supplier_df, pd.DataFrame)
+    flags = _build_supplier_compare_flags(
+        supplier_file_present=supplier_file is not None,
+        hicore_file_present=hicore_file is not None,
+        selected_supplier_name=selected_supplier_name,
+        profile_exists=profile_exists,
+        profile_ready=profile_ready,
+        supplier_file_read_error=supplier_file_read_error,
+        file_matches_profile_output_format=file_matches_profile_output_format,
+        profile_matches_uploaded_file=profile_matches_uploaded_file,
+        df_supplier_uploaded=df_supplier_uploaded,
+        current_prepare_signature=current_prepare_signature,
+        stored_prepare_signature=stored_prepare_signature,
+        prepared_supplier_df=prepared_supplier_df,
+        prepare_analysis=prepare_analysis,
     )
-    has_pending_conflicts = (
-        current_prepare_signature is not None
-        and stored_prepare_signature == current_prepare_signature
-        and prepare_analysis is not None
-        and bool(prepare_analysis.conflicts)
-    )
+    has_prepared_supplier_df = flags.has_prepared_supplier_df
+    has_pending_conflicts = flags.has_pending_conflicts
 
-    if selected_supplier_name == "":
-        st.info("Välj leverantör för att kontrollera profilstatus.")
-    elif not profile_exists:
-        st.error(
-            f'Saknar sparad leverantörsprofil för "{selected_supplier_name}". '
-            "Skapa en profil i fliken Leverantörsprofiler."
-        )
-    elif not profile_has_required_sku:
-        st.error(
-            f'Profilen för "{selected_supplier_name}" saknar mappning av "{SUPPLIER_HICORE_SKU_COLUMN}". '
-            "SKU måste alltid vara matchad."
-        )
-    else:
-        st.success(f'Färdig leverantörsprofil hittad för "{selected_supplier_name}".')
+    profile_status = _profile_status_message(
+        selected_supplier_name=selected_supplier_name,
+        profile_exists=profile_exists,
+        profile_has_required_sku=profile_has_required_sku,
+        sku_column_name=SUPPLIER_HICORE_SKU_COLUMN,
+    )
+    getattr(st, profile_status.level)(profile_status.text)
 
-    if supplier_file is not None:
-        if supplier_file_read_error is not None:
-            st.error(f"Kunde inte läsa leverantörsfilen: {supplier_file_read_error}")
-        elif profile_ready and file_matches_profile_output_format:
-            st.info(
-                "Uppladdad leverantörsfil matchar redan HiCore-formatet. "
-                "Byggsteget kör ändå dublettkontrollen innan jämförelse."
-            )
-        elif profile_ready and not profile_matches_uploaded_file:
-            st.warning(
-                "Uppladdad leverantörsfil matchar inte den sparade profilen. Saknade kolumner: "
-                + ", ".join(missing_profile_columns_for_file)
-            )
-
-    can_prepare_uploaded_file = (
-        supplier_file is not None
-        and selected_supplier_name != ""
-        and profile_ready
-        and supplier_file_read_error is None
-        and (file_matches_profile_output_format or profile_matches_uploaded_file)
-        and df_supplier_uploaded is not None
+    file_status = _supplier_file_status_message(
+        supplier_file_present=supplier_file is not None,
+        supplier_file_read_error=supplier_file_read_error,
+        profile_ready=profile_ready,
+        file_matches_profile_output_format=file_matches_profile_output_format,
+        profile_matches_uploaded_file=profile_matches_uploaded_file,
+        missing_profile_columns_for_file=missing_profile_columns_for_file,
     )
-    can_run = (
-        hicore_file is not None
-        and supplier_file is not None
-        and selected_supplier_name != ""
-        and has_prepared_supplier_df
-    )
-    can_manage_profile = selected_supplier_name != ""
-    profile_action_label = (
-        "Uppdatera leverantörsprofil" if profile_exists else "Skapa leverantörsprofil"
-    )
+    if file_status is not None:
+        getattr(st, file_status.level)(file_status.text)
 
     rebuild_col, profile_col = st.columns(2)
     if rebuild_col.button(
         "Bygg om till Hicore-format",
         type="secondary",
-        disabled=not can_prepare_uploaded_file,
+        disabled=not flags.can_prepare_uploaded_file,
         key="rebuild_supplier_file_with_profile_button",
     ):
-        update_progress, clear_progress = _build_progress_updater(
-            label="Bygg om leverant\u00f6rsfil"
+        _handle_rebuild_supplier_file(
+            current_prepare_signature=current_prepare_signature,
+            df_supplier_uploaded=df_supplier_uploaded,
+            selected_supplier_name=selected_supplier_name,
+            profile_mapping=profile_mapping,
+            profile_composite_fields=profile_composite_fields,
+            profile_filters=profile_filters,
+            profile_options=profile_options,
         )
-        update_progress(0.0, "Startar")
-        try:
-            if current_prepare_signature is None or df_supplier_uploaded is None:
-                raise ValueError("Ladda upp en leverantörsfil som matchar profilen innan du bygger.")
-
-            update_progress(0.20, "Analyserar fil")
-
-            prepare_analysis = _build_supplier_prepare_analysis(
-                df_supplier_uploaded,
-                supplier_name=selected_supplier_name,
-                profile_mapping=profile_mapping,
-                profile_composite_fields=profile_composite_fields,
-                profile_filters=profile_filters,
-                profile_options=profile_options,
-            )
-            st.session_state["supplier_prepared_signature"] = current_prepare_signature
-            st.session_state["supplier_prepare_analysis"] = prepare_analysis
-            st.session_state["supplier_prepare_resolution_choices"] = {}
-            st.session_state["supplier_prepared_df"] = None
-            st.session_state["supplier_prepared_file_name"] = None
-            st.session_state["supplier_prepared_excel_bytes"] = None
-            st.session_state["supplier_ignored_rows_df"] = None
-            st.session_state["supplier_ignored_rows_file_name"] = None
-            st.session_state["supplier_ignored_rows_excel_bytes"] = None
-            st.session_state["supplier_compare_info_message"] = None
-            _clear_supplier_result_state()
-            st.session_state["supplier_ui_error"] = None
-            update_progress(0.70, "Analyserar dubletter")
-
-            if prepare_analysis.conflicts:
-                # Render conflict resolution UI immediately after first build click.
-                update_progress(1.0, "Klar")
-                _rerun()
-
-            if not prepare_analysis.conflicts:
-                update_progress(0.90, "Slutf\u00f6r byggning")
-                ignored_rows_for_export_df = _build_ignored_rows_df(
-                    analysis=prepare_analysis,
-                    selected_candidates={},
-                )
-                prepared_df = _finalize_supplier_prepare_analysis(
-                    prepare_analysis,
-                    selected_candidates={},
-                )
-                _store_prepared_supplier_df(
-                    prepared_df=prepared_df,
-                    ignored_rows_df=ignored_rows_for_export_df,
-                    prepare_signature=current_prepare_signature,
-                    supplier_name=selected_supplier_name,
-                )
-                st.session_state["supplier_compare_info_message"] = _prepared_supplier_success_message(
-                    supplier_name=selected_supplier_name,
-                    exact_duplicate_rows_removed=prepare_analysis.exact_duplicate_rows_removed,
-                )
-                update_progress(1.0, "Klar")
-                _rerun()
-        except Exception as exc:
-            _clear_supplier_prepare_state()
-            _clear_supplier_result_state()
-            st.session_state["supplier_ui_error"] = f"Kunde inte bygga om leverantörsfilen: {exc}"
-        finally:
-            clear_progress()
 
     if profile_col.button(
-        profile_action_label,
+        flags.profile_action_label,
         type="secondary",
-        disabled=not can_manage_profile,
+        disabled=not flags.can_manage_profile,
         key="update_supplier_profile_button",
     ):
-        _request_supplier_profile_editor(selected_supplier_name)
+        _request_supplier_profile_editor(st.session_state, selected_supplier_name)
 
-    if (
-        hicore_file is not None
-        and supplier_file is not None
-        and profile_ready
-        and can_prepare_uploaded_file
-        and not has_prepared_supplier_df
-        and not has_pending_conflicts
-    ):
+    if flags.show_prepare_hint:
         st.info('Bygg om till Hicore-format innan du kör jämförelsen.')
 
     if has_pending_conflicts and prepare_analysis is not None and current_prepare_signature is not None:
-        st.error(
-            "Konfliktdubletter hittades i leverantörsfilen. "
-            "Välj vilken rad som gäller per SKU innan filen kan byggas klart."
+        conflict_render_result = _render_conflict_resolution_block(
+            prepare_analysis=prepare_analysis,
+            current_prepare_signature=current_prepare_signature,
         )
-        if prepare_analysis.exact_duplicate_rows_removed > 0:
-            st.info(
-                f"{prepare_analysis.exact_duplicate_rows_removed} exakta dublettrad(er) "
-                "togs bort automatiskt innan konfliktlistan skapades."
-            )
-
-        stored_choices_raw = st.session_state.get("supplier_prepare_resolution_choices", {})
-        stored_choices = stored_choices_raw if isinstance(stored_choices_raw, dict) else {}
-        current_choices: dict[str, str] = {}
-        for conflict in prepare_analysis.conflicts:
-            selected_candidate_id = _render_prepare_conflict_group(
-                conflict=conflict,
-                prepare_signature=current_prepare_signature,
-                stored_choices=stored_choices,
-            )
-            if selected_candidate_id is not None and str(selected_candidate_id).strip() != "":
-                current_choices[conflict.group_key] = str(selected_candidate_id).strip()
-
-        st.session_state["supplier_prepare_resolution_choices"] = current_choices
-        if current_choices != stored_choices:
+        if conflict_render_result.should_rerun:
             _rerun()
-        all_conflicts_resolved = all(
-            conflict.group_key in current_choices for conflict in prepare_analysis.conflicts
-        )
-        if st.button(
-            "Slutför byggning",
-            type="primary",
-            disabled=not all_conflicts_resolved,
-            key="finalize_supplier_prepare_button",
-        ):
-            try:
-                ignored_rows_for_export_df = _build_ignored_rows_df(
-                    analysis=prepare_analysis,
-                    selected_candidates=current_choices,
-                )
-                prepared_df = _finalize_supplier_prepare_analysis(
-                    prepare_analysis,
-                    selected_candidates=current_choices,
-                )
-                _store_prepared_supplier_df(
-                    prepared_df=prepared_df,
-                    ignored_rows_df=ignored_rows_for_export_df,
-                    prepare_signature=current_prepare_signature,
-                    supplier_name=selected_supplier_name,
-                )
-                _clear_supplier_result_state()
-                st.session_state["supplier_ui_error"] = None
-                st.session_state["supplier_compare_info_message"] = _prepared_supplier_success_message(
-                    supplier_name=selected_supplier_name,
-                    exact_duplicate_rows_removed=prepare_analysis.exact_duplicate_rows_removed,
-                )
-                _rerun()
-            except Exception as exc:
-                st.session_state["supplier_ui_error"] = (
-                    f"Kunde inte slutföra byggningen av leverantörsfilen: {exc}"
-                )
+        if conflict_render_result.finalize_requested:
+            _handle_finalize_supplier_prepare(
+                prepare_analysis=prepare_analysis,
+                current_choices=conflict_render_result.current_choices,
+                current_prepare_signature=current_prepare_signature,
+                selected_supplier_name=selected_supplier_name,
+            )
 
     if has_prepared_supplier_df:
-        st.success("Den ombyggda leverantörsfilen är klar för jämförelse.")
-        if isinstance(prepared_excel_bytes, bytes) and str(prepared_file_name).strip() != "":
-            st.download_button(
-                label="Ladda ner ombyggd leverantörsfil (Excel)",
-                data=prepared_excel_bytes,
-                file_name=str(prepared_file_name),
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="download_prepared_supplier_excel",
-            )
-        if (
-            isinstance(ignored_rows_excel_bytes, bytes)
-            and str(ignored_rows_file_name).strip() != ""
-            and isinstance(ignored_rows_df, pd.DataFrame)
-            and not ignored_rows_df.empty
-        ):
-            st.caption(f"Ignorerade rader: {len(ignored_rows_df)}")
-            st.download_button(
-                label="Ladda ner ignorerade rader (Excel)",
-                data=ignored_rows_excel_bytes,
-                file_name=str(ignored_rows_file_name),
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="download_supplier_ignored_rows_excel",
-            )
-            with st.expander("Visa ignorerade rader"):
-                st.dataframe(_with_one_based_index(ignored_rows_df), use_container_width=True)
+        _render_prepared_supplier_downloads(
+            prepared_excel_bytes=prepared_excel_bytes,
+            prepared_file_name=prepared_file_name,
+            ignored_rows_excel_bytes=ignored_rows_excel_bytes,
+            ignored_rows_file_name=ignored_rows_file_name,
+            ignored_rows_df=ignored_rows_df,
+        )
 
     run_clicked = st.button(
         "Kör Jämförelse",
         type="primary",
-        disabled=not can_run,
+        disabled=not flags.can_run,
         key="run_supplier_button",
     )
 
     if run_clicked:
-        update_progress, clear_progress = _build_progress_updater(
-            label="Leverant\u00f6rsj\u00e4mf\u00f6relse"
+        _handle_run_supplier_compare(
+            hicore_file=hicore_file,  # type: ignore[arg-type]
+            selected_supplier_name=selected_supplier_name,
+            prepared_supplier_df=prepared_supplier_df,  # type: ignore[arg-type]
+            excluded_brands=excluded_brands,
         )
-        update_progress(0.0, "Startar")
-        try:
-            result = _compute_supplier_result(
-                hicore_bytes=hicore_file["bytes"],  # type: ignore[index]
-                supplier_name=selected_supplier_name,
-                supplier_df=prepared_supplier_df,  # type: ignore[arg-type]
-                excluded_brands=[str(name) for name in excluded_brands],
-                progress_callback=update_progress,
-            )
-            update_progress(1.0, "Klar")
-            st.session_state["supplier_ui_result"] = result
-            st.session_state["supplier_ui_error"] = None
-        except Exception as exc:
-            st.session_state["supplier_ui_result"] = None
-            st.session_state["supplier_ui_error"] = str(exc)
-        finally:
-            clear_progress()
 
     st.caption(f"Antal leverantörer: {len(supplier_options)}")
     if new_supplier_names:
@@ -455,4 +270,5 @@ def _render_supplier_compare_tab(
             st.session_state["supplier_ui_result"],
             supplier_name=selected_supplier_name,
         )
+
 

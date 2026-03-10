@@ -5,11 +5,14 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-from ....supplier_profile_utils import (
+from ...session.navigation import (
+    request_supplier_profile_editor as _request_supplier_profile_editor,
+)
+from ...session.profile_access import split_suppliers_by_profile as _split_suppliers_by_profile
+from .view_model import (
     filter_supplier_names as _filter_supplier_names,
     selected_dataframe_row_index as _selected_dataframe_row_index,
 )
-from ...state import _request_supplier_profile_editor, _split_suppliers_by_profile
 
 def _render_supplier_profiles_overview(*, supplier_options: list[str]) -> None:
     st.subheader("Leverantörsprofiler")
@@ -20,7 +23,10 @@ def _render_supplier_profiles_overview(*, supplier_options: list[str]) -> None:
         placeholder="Sök i båda listorna...",
         key="supplier_profiles_search_query",
     )
-    suppliers_with_profile, suppliers_without_profile = _split_suppliers_by_profile(supplier_options)
+    suppliers_with_profile, suppliers_without_profile = _split_suppliers_by_profile(
+        st.session_state,
+        supplier_options,
+    )
     filtered_with_profile = _filter_supplier_names(suppliers_with_profile, search_query)
     filtered_without_profile = _filter_supplier_names(suppliers_without_profile, search_query)
 
@@ -54,7 +60,7 @@ def _render_supplier_profiles_overview(*, supplier_options: list[str]) -> None:
             disabled=selected_with_profile is None,
             key="open_supplier_profile_from_overview_button",
         ):
-            _request_supplier_profile_editor(str(selected_with_profile))
+            _request_supplier_profile_editor(st.session_state, str(selected_with_profile))
 
     with without_col:
         st.markdown(
@@ -86,5 +92,5 @@ def _render_supplier_profiles_overview(*, supplier_options: list[str]) -> None:
             disabled=selected_without_profile is None,
             key="create_supplier_profile_from_overview_button",
         ):
-            _request_supplier_profile_editor(str(selected_without_profile))
+            _request_supplier_profile_editor(st.session_state, str(selected_without_profile))
 

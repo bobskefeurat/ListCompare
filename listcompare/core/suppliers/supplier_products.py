@@ -3,9 +3,9 @@ from typing import Optional
 
 import pandas as pd
 
-from .product_diff import ProductMap
-from .product_normalization import normalise_price
-from .product_schema import Product
+from ..products.product_diff import ProductMap
+from ..products.product_normalization import normalise_price
+from ..products.product_schema import Product
 
 SUPPLIER_ID_COLUMNS = (
     "EAN",

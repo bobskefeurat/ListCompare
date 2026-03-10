@@ -3,10 +3,10 @@ import unittest
 
 import pandas as pd
 
-from listcompare.core.product_schema import HICORE_COLUMNS
-from listcompare.interfaces.ui.compute_compare import (
-    _compute_compare_result,
-    _compute_web_order_compare_result,
+from listcompare.core.products.product_schema import HICORE_COLUMNS
+from listcompare.interfaces.ui.services.compare_compute import (
+    compute_compare_result,
+    compute_web_order_compare_result,
 )
 
 
@@ -65,7 +65,7 @@ class CompareUiComputeTests(unittest.TestCase):
             ]
         )
 
-        result = _compute_web_order_compare_result(
+        result = compute_web_order_compare_result(
             hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
             magento_bytes=_to_csv_bytes(df_magento, sep=","),
         )
@@ -111,7 +111,7 @@ class CompareUiComputeTests(unittest.TestCase):
             ]
         )
 
-        result = _compute_compare_result(
+        result = compute_compare_result(
             hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
             magento_bytes=_to_csv_bytes(df_magento, sep=";"),
         )
@@ -123,7 +123,7 @@ class CompareUiComputeTests(unittest.TestCase):
         df_hicore = pd.DataFrame([{"Ordernr": "10"}])
         df_magento = pd.DataFrame([{"Other": "20"}])
 
-        result = _compute_web_order_compare_result(
+        result = compute_web_order_compare_result(
             hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
             magento_bytes=_to_csv_bytes(df_magento, sep=","),
         )

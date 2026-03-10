@@ -3,16 +3,16 @@ import unittest
 
 import pandas as pd
 
-from listcompare.core.product_schema import HICORE_COLUMNS
-from listcompare.interfaces.supplier_prepare_utils import (
+from listcompare.core.products.product_schema import HICORE_COLUMNS
+from listcompare.core.suppliers.prepare import (
     build_supplier_prepare_analysis,
     finalize_supplier_prepare_analysis,
 )
-from listcompare.interfaces.supplier_profile_utils import (
+from listcompare.core.suppliers.profile import (
     SUPPLIER_HICORE_RENAME_COLUMNS,
     SUPPLIER_HICORE_SUPPLIER_COLUMN,
 )
-from listcompare.interfaces.ui.compute_supplier import _compute_supplier_result
+from listcompare.interfaces.ui.services.supplier_compute import compute_supplier_result
 
 
 def _to_csv_bytes(df: pd.DataFrame) -> bytes:
@@ -101,7 +101,7 @@ class SupplierUiExportTests(unittest.TestCase):
                 },
             ]
         )
-        result = _compute_supplier_result(
+        result = compute_supplier_result(
             hicore_bytes=hicore_bytes,
             supplier_name="EM Nordic",
             supplier_df=df_supplier,
@@ -203,7 +203,7 @@ class SupplierUiExportTests(unittest.TestCase):
             selected_candidates={},
         )
 
-        result = _compute_supplier_result(
+        result = compute_supplier_result(
             hicore_bytes=hicore_bytes,
             supplier_name="EM Nordic",
             supplier_df=prepared_supplier_df,
