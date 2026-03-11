@@ -29,16 +29,23 @@ def _render_product_compare_results(result: CompareUiResult) -> None:
         columns=["map_key", "price", "supplier"],
         errors="ignore",
     )
+    only_in_hicore_web_visible_in_stock_display_df = (
+        result.only_in_hicore_web_visible_in_stock_df.drop(
+            columns=["map_key", "price", "supplier"],
+            errors="ignore",
+        )
+    )
     stock_mismatch_display_df = result.stock_mismatch_df.drop(
         columns=["normalized_sku", "side"],
         errors="ignore",
     )
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     col1.metric("Unika i Magento", result.only_in_magento_count)
-    col2.metric("Lagerdiff", result.stock_mismatch_count)
+    col2.metric("Endast i HiCore på webb", result.only_in_hicore_web_visible_in_stock_count)
+    col3.metric("Lagerdiff", result.stock_mismatch_count)
 
-    download_col1, download_col2 = st.columns(2)
+    download_col1, download_col2, download_col3 = st.columns(3)
     download_col1.download_button(
         label="Ladda ner only_in_magento_skus.csv",
         data=result.only_in_magento_csv_bytes,
@@ -47,6 +54,13 @@ def _render_product_compare_results(result: CompareUiResult) -> None:
         key="download_only_in_magento_csv",
     )
     download_col2.download_button(
+        label="Ladda ner only_in_hicore_visible_web_in_stock_skus.csv",
+        data=result.only_in_hicore_web_visible_in_stock_csv_bytes,
+        file_name="only_in_hicore_visible_web_in_stock_skus.csv",
+        mime="text/csv",
+        key="download_only_in_hicore_visible_web_in_stock_csv",
+    )
+    download_col3.download_button(
         label="Ladda ner stock_mismatch_skus.csv",
         data=result.stock_mismatch_csv_bytes,
         file_name="stock_mismatch_skus.csv",
@@ -54,10 +68,17 @@ def _render_product_compare_results(result: CompareUiResult) -> None:
         key="download_stock_mismatch_csv",
     )
 
-    tab1, tab2 = st.tabs(["Unika i Magento", "Lagerdiff"])
+    tab1, tab2, tab3 = st.tabs(
+        ["Unika i Magento", "Endast i HiCore på webb", "Lagerdiff"]
+    )
     with tab1:
         st.dataframe(_with_one_based_index(only_in_magento_display_df), use_container_width=True)
     with tab2:
+        st.dataframe(
+            _with_one_based_index(only_in_hicore_web_visible_in_stock_display_df),
+            use_container_width=True,
+        )
+    with tab3:
         st.dataframe(
             _style_stock_mismatch_df(_with_one_based_index(stock_mismatch_display_df)),
             use_container_width=True,

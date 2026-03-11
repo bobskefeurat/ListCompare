@@ -11,6 +11,7 @@ HICORE_COLUMNS = {
     "reserved": "Reserverade",
     "supplier": "Leverant\u00f6r",
     "brand": "Varum\u00e4rke",
+    "show_on_web": "VisaPåWebb",
 }
 
 MAGENTO_COLUMNS = {

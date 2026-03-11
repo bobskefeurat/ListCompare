@@ -44,10 +44,13 @@ UPLOADER_KEYS_BY_KIND = {
 @dataclass(frozen=True)
 class CompareUiResult:
     only_in_magento_df: pd.DataFrame
+    only_in_hicore_web_visible_in_stock_df: pd.DataFrame
     stock_mismatch_df: pd.DataFrame
     only_in_magento_csv_bytes: bytes
+    only_in_hicore_web_visible_in_stock_csv_bytes: bytes
     stock_mismatch_csv_bytes: bytes
     only_in_magento_count: int
+    only_in_hicore_web_visible_in_stock_count: int
     stock_mismatch_count: int
     warning_message: Optional[str]
 

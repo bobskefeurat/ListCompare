@@ -117,7 +117,77 @@ class CompareUiComputeTests(unittest.TestCase):
         )
 
         self.assertEqual(result.only_in_magento_count, 1)
+        self.assertEqual(result.only_in_hicore_web_visible_in_stock_count, 0)
         self.assertEqual(result.stock_mismatch_count, 0)
+        self.assertEqual(
+            result.warning_message,
+            'HiCore-filen saknar kolumnen "VisaPåWebb". Den nya HiCore-fliken kunde inte beräknas.',
+        )
+
+    def test_compare_result_includes_hicore_only_visible_web_products_with_positive_computed_stock(
+        self,
+    ) -> None:
+        sku_col = HICORE_COLUMNS["sku"]
+        name_col = HICORE_COLUMNS["name"]
+        total_col = HICORE_COLUMNS["total_stock"]
+        reserved_col = HICORE_COLUMNS["reserved"]
+        show_on_web_col = HICORE_COLUMNS["show_on_web"]
+
+        df_hicore = pd.DataFrame(
+            [
+                {
+                    sku_col: "001",
+                    name_col: "Product A",
+                    total_col: "3",
+                    reserved_col: "1",
+                    show_on_web_col: "True",
+                },
+                {
+                    sku_col: "002",
+                    name_col: "Product B",
+                    total_col: "5",
+                    reserved_col: "0",
+                    show_on_web_col: "False",
+                },
+                {
+                    sku_col: "003",
+                    name_col: "Product C",
+                    total_col: "1",
+                    reserved_col: "1",
+                    show_on_web_col: "True",
+                },
+                {
+                    sku_col: "004",
+                    name_col: "Product D",
+                    total_col: "2",
+                    reserved_col: "0",
+                    show_on_web_col: "True",
+                },
+            ]
+        )
+        df_magento = pd.DataFrame(
+            [
+                {
+                    "sku": "004",
+                    "name": "Product D",
+                    "qty": "2",
+                }
+            ]
+        )
+
+        result = compute_compare_result(
+            hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
+            magento_bytes=_to_csv_bytes(df_magento, sep=","),
+        )
+
+        self.assertEqual(result.only_in_hicore_web_visible_in_stock_count, 1)
+        self.assertEqual(
+            result.only_in_hicore_web_visible_in_stock_df["sku"].tolist(),
+            ["001"],
+        )
+        export_df = _read_csv_bytes(result.only_in_hicore_web_visible_in_stock_csv_bytes)
+        self.assertEqual(export_df.columns.tolist(), [sku_col])
+        self.assertEqual(export_df[sku_col].tolist(), ["001"])
 
     def test_compare_web_order_result_warns_when_order_columns_are_missing(self) -> None:
         df_hicore = pd.DataFrame([{"Ordernr": "10"}])
