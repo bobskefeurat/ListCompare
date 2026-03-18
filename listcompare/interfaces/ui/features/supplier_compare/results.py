@@ -31,19 +31,29 @@ def _render_supplier_results(result: SupplierUiResult, *, supplier_name: str) ->
         columns=["normalized_sku", "side"],
         errors="ignore",
     )
+    article_number_review_display_df = result.article_number_review_df.drop(
+        columns=["normalized_article_number"],
+        errors="ignore",
+    )
+    if "article_number" in article_number_review_display_df.columns:
+        article_number_review_display_df = article_number_review_display_df.rename(
+            columns={"article_number": "Lev.artnr"}
+        )
 
-    metric_col_1, metric_col_2, metric_col_3, metric_col_4 = st.columns(4)
+    metric_col_1, metric_col_2, metric_col_3, metric_col_4, metric_col_5 = st.columns(5)
     metric_col_1.metric("Utgående", result.outgoing_count)
     metric_col_2.metric("Nyheter", result.new_products_count)
     metric_col_3.metric("Prisuppdatering, Ej i lager", result.price_updates_out_of_stock_count)
     metric_col_4.metric("Prisuppdatering, I lager", result.price_updates_in_stock_count)
+    metric_col_5.metric("Behöver granskas", result.article_number_review_count)
 
-    tab_outgoing, tab_new, tab_price_oos, tab_price_in = st.tabs(
+    tab_outgoing, tab_new, tab_price_oos, tab_price_in, tab_review = st.tabs(
         [
             "Utgående",
             "Nyheter",
             "Prisuppdatering, Ej i lager",
             "Prisuppdatering, I lager",
+            "Behöver granskas",
         ]
     )
     with tab_outgoing:
@@ -107,6 +117,22 @@ def _render_supplier_results(result: SupplierUiResult, *, supplier_name: str) ->
         )
         st.dataframe(
             _style_stock_mismatch_df(_with_one_based_index(price_updates_in_stock_display_df)),
+            use_container_width=True,
+        )
+    with tab_review:
+        st.caption("Visar rader som inte matchade på SKU men där artikelnummer gav en möjlig eller otydlig koppling.")
+        st.download_button(
+            label="Ladda ner Behöver granskas",
+            data=result.article_number_review_excel_bytes,
+            file_name=_supplier_compare_export_file_name(
+                supplier_name=supplier_name,
+                label="Behover granskas",
+            ),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_supplier_article_review_excel",
+        )
+        st.dataframe(
+            _style_stock_mismatch_df(_with_one_based_index(article_number_review_display_df)),
             use_container_width=True,
         )
 

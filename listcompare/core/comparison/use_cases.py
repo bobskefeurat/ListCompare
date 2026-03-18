@@ -28,6 +28,75 @@ class SupplierComparisonResults:
     new_products: ProductMap
     price_updates_out_of_stock: MismatchMap
     price_updates_in_stock: MismatchMap
+    article_number_review_matches: tuple["SupplierArticleNumberReviewMatch", ...]
+
+
+@dataclass(frozen=True)
+class SupplierArticleNumberReviewMatch:
+    normalized_article_number: str
+    article_number: str
+    hicore_rows: tuple[Product, ...]
+    supplier_rows: tuple[Product, ...]
+
+
+def _build_normalized_article_number_map(product_map: ProductMap) -> dict[str, list[Product]]:
+    out: dict[str, list[Product]] = {}
+    for rows in product_map.values():
+        for product in rows:
+            key = normalize_sku(str(product.article_number).strip())
+            if key == "":
+                continue
+            out.setdefault(key, []).append(product)
+    return out
+
+
+def _display_article_number(*groups: list[Product]) -> str:
+    for group in groups:
+        for product in group:
+            article_number = str(product.article_number).strip()
+            if article_number != "":
+                return article_number
+    return ""
+
+
+def _build_article_number_review_matches(
+    outgoing: ProductMap,
+    new_products: ProductMap,
+) -> tuple[tuple[SupplierArticleNumberReviewMatch, ...], set[str], set[str]]:
+    outgoing_article_map = _build_normalized_article_number_map(outgoing)
+    new_article_map = _build_normalized_article_number_map(new_products)
+    shared_article_numbers = set(outgoing_article_map.keys()) & set(new_article_map.keys())
+
+    review_matches: list[SupplierArticleNumberReviewMatch] = []
+    matched_outgoing_skus: set[str] = set()
+    matched_new_product_skus: set[str] = set()
+
+    for normalized_article_number in sorted(
+        shared_article_numbers,
+        key=lambda value: (normalize_sku(str(value)), str(value)),
+    ):
+        hicore_rows = list(outgoing_article_map[normalized_article_number])
+        supplier_rows = list(new_article_map[normalized_article_number])
+        review_matches.append(
+            SupplierArticleNumberReviewMatch(
+                normalized_article_number=normalized_article_number,
+                article_number=_display_article_number(hicore_rows, supplier_rows),
+                hicore_rows=tuple(hicore_rows),
+                supplier_rows=tuple(supplier_rows),
+            )
+        )
+        matched_outgoing_skus.update(
+            normalize_sku(str(product.sku).strip())
+            for product in hicore_rows
+            if normalize_sku(str(product.sku).strip()) != ""
+        )
+        matched_new_product_skus.update(
+            normalize_sku(str(product.sku).strip())
+            for product in supplier_rows
+            if normalize_sku(str(product.sku).strip()) != ""
+        )
+
+    return tuple(review_matches), matched_outgoing_skus, matched_new_product_skus
 
 
 def filter_products_by_supplier_with_sku(
@@ -120,6 +189,16 @@ def build_supplier_comparison_results(
 
     hicore_comparable = filter_products_by_supplier_with_sku(hicore_map, supplier_internal_name)
     outgoing, new_products = find_missing_skus(hicore_comparable, supplier_map)
+    article_number_review_matches, matched_outgoing_skus, matched_new_product_skus = (
+        _build_article_number_review_matches(outgoing, new_products)
+    )
+    if matched_outgoing_skus:
+        outgoing = filter_product_map_by_excluded_normalized_skus(outgoing, matched_outgoing_skus)
+    if matched_new_product_skus:
+        new_products = filter_product_map_by_excluded_normalized_skus(
+            new_products,
+            matched_new_product_skus,
+        )
 
     hicore_norm = build_normalized_map(hicore_comparable)
     supplier_norm = build_normalized_map(supplier_map)
@@ -153,6 +232,7 @@ def build_supplier_comparison_results(
         new_products=new_products,
         price_updates_out_of_stock=price_updates_out_of_stock,
         price_updates_in_stock=price_updates_in_stock,
+        article_number_review_matches=article_number_review_matches,
     )
 
 

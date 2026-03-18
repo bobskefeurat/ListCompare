@@ -10,7 +10,7 @@ from ....core.comparison.use_cases import (
 )
 from ....core.products.product_diff import normalize_sku
 from ....core.products.product_mapping import build_product_map
-from ....core.products.product_schema import HICORE_COLUMNS
+from ....core.products.product_schema import HICORE_COLUMNS, Product
 from ....core.suppliers.supplier_products import (
     build_supplier_map,
     find_supplier_id_column,
@@ -31,7 +31,11 @@ from ..compute_shared import (
 )
 from ..io.brand_filter import _normalized_skus_for_excluded_brands
 from ..io.exports import _df_excel_bytes
-from ..io.tables import _mismatch_map_to_df, _product_map_to_df
+from ..io.tables import (
+    _article_number_review_matches_to_df,
+    _mismatch_map_to_df,
+    _product_map_to_df,
+)
 from ..io.uploads import _uploaded_csv_to_df
 
 
@@ -43,6 +47,7 @@ def _build_supplier_price_export_df(
     purchase_column: Optional[str],
     normalized_skus: set[str],
     include_purchase: bool,
+    hicore_skus_by_normalized_sku: Optional[dict[str, str]] = None,
 ) -> pd.DataFrame:
     sku_column_name = HICORE_COLUMNS["sku"]
     price_column_name = HICORE_COLUMNS["price"]
@@ -60,15 +65,35 @@ def _build_supplier_price_export_df(
     if filtered_rows.empty:
         return pd.DataFrame(columns=export_columns)
 
+    cleaned_skus = filtered_rows[id_column].map(_to_clean_text)
+    normalized_row_skus = cleaned_skus.map(lambda value: normalize_sku(str(value)))
     export_df = pd.DataFrame()
-    export_df[sku_column_name] = filtered_rows[id_column].map(_to_clean_text)
+    export_df[sku_column_name] = [
+        hicore_skus_by_normalized_sku.get(normalized_sku, raw_sku)
+        if hicore_skus_by_normalized_sku is not None
+        else raw_sku
+        for raw_sku, normalized_sku in zip(cleaned_skus.tolist(), normalized_row_skus.tolist())
+    ]
     if include_purchase:
         if purchase_column is not None and purchase_column in filtered_rows.columns:
-            export_df[purchase_column_name] = filtered_rows[purchase_column].map(_to_clean_text)
+            export_df[purchase_column_name] = filtered_rows[purchase_column].map(_to_clean_text).tolist()
         else:
             export_df[purchase_column_name] = ""
-    export_df[price_column_name] = filtered_rows[price_column].map(_to_clean_text)
+    export_df[price_column_name] = filtered_rows[price_column].map(_to_clean_text).tolist()
     return _sort_df_by_sku_column(export_df, sku_column=sku_column_name)
+
+
+def _hicore_skus_by_normalized_sku(
+    mismatch_map: dict[str, dict[str, list[Product]]],
+) -> dict[str, str]:
+    hicore_skus: dict[str, str] = {}
+    for normalized_sku, sides in mismatch_map.items():
+        for product in sides.get("hicore", []):
+            sku = str(product.sku).strip()
+            if sku != "":
+                hicore_skus[normalized_sku] = sku
+                break
+    return hicore_skus
 
 
 def compute_supplier_result(
@@ -142,6 +167,8 @@ def compute_supplier_result(
     _notify_progress(progress_callback, 0.86, "Bygger export för prisuppdateringar")
     out_of_stock_normalized_skus = set(results.price_updates_out_of_stock.keys())
     in_stock_normalized_skus = set(results.price_updates_in_stock.keys())
+    out_of_stock_hicore_skus = _hicore_skus_by_normalized_sku(results.price_updates_out_of_stock)
+    in_stock_hicore_skus = _hicore_skus_by_normalized_sku(results.price_updates_in_stock)
     price_updates_out_of_stock_export_df = _build_supplier_price_export_df(
         df_supplier,
         id_column=id_column,
@@ -149,6 +176,7 @@ def compute_supplier_result(
         purchase_column=purchase_column,
         normalized_skus=out_of_stock_normalized_skus,
         include_purchase=True,
+        hicore_skus_by_normalized_sku=out_of_stock_hicore_skus,
     )
     price_updates_in_stock_export_df = _build_supplier_price_export_df(
         df_supplier,
@@ -157,7 +185,15 @@ def compute_supplier_result(
         purchase_column=purchase_column,
         normalized_skus=in_stock_normalized_skus,
         include_purchase=False,
+        hicore_skus_by_normalized_sku=in_stock_hicore_skus,
     )
+    article_number_review_df = _article_number_review_matches_to_df(
+        results.article_number_review_matches
+    )
+    article_number_review_export_df = article_number_review_df.drop(
+        columns=["normalized_article_number"],
+        errors="ignore",
+    ).rename(columns={"article_number": "Lev.artnr"})
 
     _notify_progress(progress_callback, 0.95, "Skapar Excelfiler")
     result = SupplierUiResult(
@@ -171,6 +207,7 @@ def compute_supplier_result(
             results.price_updates_in_stock,
             preferred_side_order=("hicore", "supplier"),
         ),
+        article_number_review_df=article_number_review_df,
         outgoing_excel_bytes=_df_excel_bytes(outgoing_export_df, sheet_name="Utg\u00e5ende"),
         new_products_excel_bytes=_df_excel_bytes(new_products_export_df, sheet_name="Nyheter"),
         price_updates_out_of_stock_excel_bytes=_df_excel_bytes(
@@ -181,10 +218,15 @@ def compute_supplier_result(
             price_updates_in_stock_export_df,
             sheet_name="Prisuppdatering, I lager",
         ),
+        article_number_review_excel_bytes=_df_excel_bytes(
+            article_number_review_export_df,
+            sheet_name="Behöver granskas",
+        ),
         outgoing_count=len(results.outgoing),
         new_products_count=len(results.new_products),
         price_updates_out_of_stock_count=len(results.price_updates_out_of_stock),
         price_updates_in_stock_count=len(results.price_updates_in_stock),
+        article_number_review_count=len(results.article_number_review_matches),
         warning_message=warning_message,
     )
     _notify_progress(progress_callback, 1.0, "Klar")

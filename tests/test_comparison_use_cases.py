@@ -16,12 +16,14 @@ def make_product(
     sku: str,
     source: str,
     supplier: str = "",
+    article_number: str = "",
     name: str = "",
     stock: str = "",
     price: str = "",
 ) -> Product:
     return Product(
         sku=sku,
+        article_number=article_number,
         name=name,
         stock=stock,
         price=price,
@@ -139,6 +141,81 @@ class ComparisonUseCaseTests(unittest.TestCase):
         self.assertEqual(set(results.new_products.keys()), {"4"})
         self.assertEqual(set(results.price_updates_out_of_stock.keys()), {"1"})
         self.assertEqual(set(results.price_updates_in_stock.keys()), {"2"})
+        self.assertEqual(results.article_number_review_matches, ())
+
+    def test_build_supplier_comparison_results_moves_unique_article_number_match_to_review(self) -> None:
+        hicore_map = {
+            "OLD-1": [
+                make_product(
+                    sku="OLD-1",
+                    article_number="ART-9",
+                    source="hicore",
+                    supplier="EM Nordic",
+                )
+            ],
+        }
+        supplier_map = {
+            "NEW-1": [
+                make_product(
+                    sku="NEW-1",
+                    article_number="ART-9",
+                    source="supplier",
+                )
+            ],
+        }
+
+        results = build_supplier_comparison_results(
+            hicore_map,
+            supplier_map,
+            supplier_internal_name="EM Nordic",
+        )
+
+        self.assertEqual(results.outgoing, {})
+        self.assertEqual(results.new_products, {})
+        self.assertEqual(len(results.article_number_review_matches), 1)
+        self.assertEqual(
+            results.article_number_review_matches[0].article_number,
+            "ART-9",
+        )
+
+    def test_build_supplier_comparison_results_moves_ambiguous_article_number_match_to_review(self) -> None:
+        hicore_map = {
+            "OLD-1": [
+                make_product(
+                    sku="OLD-1",
+                    article_number="ART-9",
+                    source="hicore",
+                    supplier="EM Nordic",
+                )
+            ],
+            "OLD-2": [
+                make_product(
+                    sku="OLD-2",
+                    article_number="ART-9",
+                    source="hicore",
+                    supplier="EM Nordic",
+                )
+            ],
+        }
+        supplier_map = {
+            "NEW-1": [
+                make_product(
+                    sku="NEW-1",
+                    article_number="ART-9",
+                    source="supplier",
+                )
+            ],
+        }
+
+        results = build_supplier_comparison_results(
+            hicore_map,
+            supplier_map,
+            supplier_internal_name="EM Nordic",
+        )
+
+        self.assertEqual(results.outgoing, {})
+        self.assertEqual(results.new_products, {})
+        self.assertEqual(len(results.article_number_review_matches), 1)
 
     def test_build_supplier_comparison_results_ignores_equivalent_price_formats(self) -> None:
         hicore_map = {

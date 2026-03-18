@@ -24,6 +24,7 @@ def build_product_map(
     sku_col = columns["sku"]
     name_col = columns["name"]
     stock_col = columns["stock"]
+    article_number_col = columns.get("article_number")
     total_col = columns.get("total_stock")
     reserved_col = columns.get("reserved")
     price_col = columns.get("price")
@@ -32,6 +33,7 @@ def build_product_map(
     sku_values = _column_values(df, sku_col)
     name_values = _column_values(df, name_col)
     stock_values = _column_values(df, stock_col)
+    article_number_values = _column_values(df, article_number_col)
     total_values = _column_values(df, total_col)
     reserved_values = _column_values(df, reserved_col)
     price_values = _column_values(df, price_col)
@@ -44,8 +46,9 @@ def build_product_map(
     compute_hicore_stock_value = compute_hicore_stock
 
     products: dict[str, list[Product]] = defaultdict(list)
-    for sku_raw, name_raw, stock_raw, total_raw, reserved_raw, price_raw, supplier_raw in zip(
+    for sku_raw, article_number_raw, name_raw, stock_raw, total_raw, reserved_raw, price_raw, supplier_raw in zip(
         sku_values,
+        article_number_values,
         name_values,
         stock_values,
         total_values,
@@ -54,6 +57,7 @@ def build_product_map(
         supplier_values,
     ):
         sku = to_str_value(sku_raw)
+        article_number = to_str_value(article_number_raw)
         name = to_str_value(name_raw)
         supplier = to_str_value(supplier_raw) if supplier_col else ""
         price = normalize_price_value(price_raw) if price_col else ""
@@ -66,6 +70,7 @@ def build_product_map(
         products[sku].append(
             Product(
                 sku=sku,
+                article_number=article_number,
                 name=name,
                 stock=stock,
                 price=price,

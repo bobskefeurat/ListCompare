@@ -1,5 +1,6 @@
 from .use_cases import (
     ComparisonResults,
+    SupplierArticleNumberReviewMatch,
     SupplierComparisonResults,
     build_comparison_results,
     build_supplier_comparison_results,
@@ -11,6 +12,7 @@ from .use_cases import (
 
 __all__ = [
     "ComparisonResults",
+    "SupplierArticleNumberReviewMatch",
     "SupplierComparisonResults",
     "build_comparison_results",
     "build_supplier_comparison_results",

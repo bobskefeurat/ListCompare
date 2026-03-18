@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 HICORE_COLUMNS = {
     "sku": "Art.m\u00e4rkning",
+    "article_number": "Lev.artnr",
     "name": "Artikelnamn",
     "stock": "I lager",
     "price": "UtprisInklMoms",
@@ -16,6 +17,7 @@ HICORE_COLUMNS = {
 
 MAGENTO_COLUMNS = {
     "sku": "sku",
+    "article_number": None,
     "name": "name",
     "stock": "qty",
     "price": None,
@@ -31,3 +33,4 @@ class Product:
     supplier: str
     source: str
     price: str = ""
+    article_number: str = ""

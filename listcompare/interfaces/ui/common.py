@@ -1,18 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 
 CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin1")
-SUPPLIER_INDEX_PATH = (Path(__file__).resolve().parents[3] / "supplier_index.txt").resolve()
-BRAND_INDEX_PATH = (Path(__file__).resolve().parents[3] / "brand_index.txt").resolve()
-UI_SETTINGS_PATH = (Path(__file__).resolve().parents[3] / "ui_settings.json").resolve()
-SUPPLIER_TRANSFORM_PROFILES_PATH = (
-    Path(__file__).resolve().parents[3] / "supplier_transform_profiles.json"
-).resolve()
 
 MENU_COMPARE = "J\u00e4mf\u00f6r Hicore/Magento"
 MENU_SUPPLIER = "Hantera leverant\u00f6r"
@@ -69,12 +62,15 @@ class SupplierUiResult:
     new_products_df: pd.DataFrame
     price_updates_out_of_stock_df: pd.DataFrame
     price_updates_in_stock_df: pd.DataFrame
+    article_number_review_df: pd.DataFrame
     outgoing_excel_bytes: bytes
     new_products_excel_bytes: bytes
     price_updates_out_of_stock_excel_bytes: bytes
     price_updates_in_stock_excel_bytes: bytes
+    article_number_review_excel_bytes: bytes
     outgoing_count: int
     new_products_count: int
     price_updates_out_of_stock_count: int
     price_updates_in_stock_count: int
+    article_number_review_count: int
     warning_message: Optional[str]

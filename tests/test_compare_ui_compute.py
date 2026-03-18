@@ -205,6 +205,76 @@ class CompareUiComputeTests(unittest.TestCase):
         )
         self.assertTrue(result.magento_only_web_orders_df.empty)
 
+    def test_compare_result_stock_mismatch_df_keeps_source_but_not_side(self) -> None:
+        sku_col = HICORE_COLUMNS["sku"]
+        name_col = HICORE_COLUMNS["name"]
+        total_col = HICORE_COLUMNS["total_stock"]
+        reserved_col = HICORE_COLUMNS["reserved"]
+
+        df_hicore = pd.DataFrame(
+            [
+                {
+                    sku_col: "001",
+                    name_col: "Product A",
+                    total_col: "3",
+                    reserved_col: "0",
+                }
+            ]
+        )
+        df_magento = pd.DataFrame(
+            [
+                {
+                    "sku": "1",
+                    "name": "Product A",
+                    "qty": "2",
+                }
+            ]
+        )
+
+        result = compute_compare_result(
+            hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
+            magento_bytes=_to_csv_bytes(df_magento, sep=","),
+        )
+
+        self.assertEqual(result.stock_mismatch_count, 1)
+        self.assertNotIn("side", result.stock_mismatch_df.columns.tolist())
+        self.assertEqual(result.stock_mismatch_df["source"].tolist(), ["hicore", "magento"])
+
+    def test_compare_result_stock_mismatch_csv_uses_hicore_sku_format(self) -> None:
+        sku_col = HICORE_COLUMNS["sku"]
+        name_col = HICORE_COLUMNS["name"]
+        total_col = HICORE_COLUMNS["total_stock"]
+        reserved_col = HICORE_COLUMNS["reserved"]
+
+        df_hicore = pd.DataFrame(
+            [
+                {
+                    sku_col: "00123",
+                    name_col: "Product A",
+                    total_col: "5",
+                    reserved_col: "0",
+                }
+            ]
+        )
+        df_magento = pd.DataFrame(
+            [
+                {
+                    "sku": "123",
+                    "name": "Product A",
+                    "qty": "3",
+                }
+            ]
+        )
+
+        result = compute_compare_result(
+            hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
+            magento_bytes=_to_csv_bytes(df_magento, sep=","),
+        )
+
+        export_df = _read_csv_bytes(result.stock_mismatch_csv_bytes)
+        self.assertEqual(export_df.columns.tolist(), [sku_col])
+        self.assertEqual(export_df[sku_col].tolist(), ["00123"])
+
 
 if __name__ == "__main__":
     unittest.main()

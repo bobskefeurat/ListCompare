@@ -173,7 +173,7 @@ def compute_compare_result(
         },
         key=lambda sku: (normalize_sku(str(sku)), str(sku)),
     )
-    stock_skus = unique_sorted_skus_from_mismatch_side(results.stock_mismatches, "magento")
+    stock_skus = unique_sorted_skus_from_mismatch_side(results.stock_mismatches, "hicore")
     result = CompareUiResult(
         only_in_magento_df=_product_map_to_df(results.only_in_magento),
         only_in_hicore_web_visible_in_stock_df=only_in_hicore_web_visible_in_stock_df,
