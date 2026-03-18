@@ -50,10 +50,11 @@ class SupplierTransformOptionTests(unittest.TestCase):
         self.assertEqual(renamed["Art.m\u00e4rkning"].tolist(), ["123", "45", "A99"])
         self.assertTrue((renamed["Leverant\u00f6r"] == "EM Nordic").all())
 
-    def test_build_supplier_transform_can_ignore_rows_without_sku(self) -> None:
+    def test_build_supplier_transform_falls_back_to_article_number_and_drops_rows_without_ids(self) -> None:
         df_supplier = pd.DataFrame(
             {
                 "SupplierSku": ["00123", "", None, "   ", "0000"],
+                "SupplierArticleNo": ["", "A-2", "00456", "   ", ""],
                 "NameCol": ["P1", "P2", "P3", "P4", "P5"],
             }
         )
@@ -62,15 +63,16 @@ class SupplierTransformOptionTests(unittest.TestCase):
             df_supplier,
             target_to_source={
                 "Art.m\u00e4rkning": "SupplierSku",
+                "Lev.artnr": "SupplierArticleNo",
                 "Artikelnamn": "NameCol",
             },
             supplier_name="EM Nordic",
             strip_leading_zeros_from_sku=True,
-            ignore_rows_missing_sku=True,
         )
 
-        self.assertEqual(renamed["Art.m\u00e4rkning"].tolist(), ["123", "0"])
-        self.assertEqual(len(renamed), 2)
+        self.assertEqual(renamed["Art.m\u00e4rkning"].tolist(), ["123", "A-2", "456", "0"])
+        self.assertEqual(renamed["Lev.artnr"].tolist(), ["", "A-2", "00456", ""])
+        self.assertEqual(len(renamed), 4)
 
     def test_build_supplier_transform_can_build_composite_article_name(self) -> None:
         df_supplier = pd.DataFrame(
@@ -206,7 +208,6 @@ class SupplierTransformOptionTests(unittest.TestCase):
                     },
                     "options": {
                         "strip_leading_zeros_from_sku": True,
-                        "ignore_rows_missing_sku": False,
                     },
                 }
             },
@@ -227,6 +228,26 @@ class SupplierTransformOptionTests(unittest.TestCase):
                 "brand_source_column": "Brand",
                 "excluded_brand_values": ["Acme"],
             },
+        )
+
+    def test_profile_roundtrip_ignores_legacy_missing_sku_option(self) -> None:
+        class _InMemoryPath:
+            def exists(self) -> bool:
+                return True
+
+            def read_text(self, encoding: str = "utf-8-sig") -> str:
+                del encoding
+                return (
+                    '{"profiles":{"EM Nordic":{"target_to_source":{"Art.m\\u00e4rkning":"SupplierSku"},'
+                    '"options":{"strip_leading_zeros_from_sku":true,"ignore_rows_missing_sku":true}}}}'
+                )
+
+        loaded_profiles, load_error = load_profiles(_InMemoryPath())
+
+        self.assertIsNone(load_error)
+        self.assertEqual(
+            loaded_profiles["EM Nordic"]["options"],
+            {"strip_leading_zeros_from_sku": True},
         )
 
 

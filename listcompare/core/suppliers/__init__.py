@@ -8,6 +8,7 @@ from .prepare import (
     supplier_prepare_signature,
 )
 from .profile import (
+    SUPPLIER_HICORE_ARTICLE_NUMBER_COLUMN,
     SUPPLIER_HICORE_NAME_COLUMN,
     SUPPLIER_HICORE_RENAME_COLUMNS,
     SUPPLIER_HICORE_SKU_COLUMN,
@@ -45,6 +46,7 @@ __all__ = [
     "build_supplier_prepare_analysis",
     "finalize_supplier_prepare_analysis",
     "supplier_prepare_signature",
+    "SUPPLIER_HICORE_ARTICLE_NUMBER_COLUMN",
     "SUPPLIER_HICORE_NAME_COLUMN",
     "SUPPLIER_HICORE_RENAME_COLUMNS",
     "SUPPLIER_HICORE_SKU_COLUMN",

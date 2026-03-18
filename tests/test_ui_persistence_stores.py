@@ -75,7 +75,6 @@ class UiPersistenceStoreTests(unittest.TestCase):
                     },
                     "options": {
                         "strip_leading_zeros_from_sku": True,
-                        "ignore_rows_missing_sku": False,
                     },
                 }
             },

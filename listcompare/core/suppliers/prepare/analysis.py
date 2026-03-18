@@ -13,7 +13,6 @@ from ..profile import (
     SUPPLIER_HICORE_SUPPLIER_COLUMN,
     SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN,
     SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES,
-    SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU,
     SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS,
     build_supplier_hicore_renamed_copy,
     matches_profile_output_format,
@@ -191,9 +190,6 @@ def build_supplier_prepare_analysis(
             ],
             strip_leading_zeros_from_sku=normalized_profile_options[
                 SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS
-            ],
-            ignore_rows_missing_sku=normalized_profile_options[
-                SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU
             ],
             source_row_column=_SOURCE_ROW_COLUMN,
         )

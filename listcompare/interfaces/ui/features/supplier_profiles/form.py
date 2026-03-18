@@ -58,7 +58,6 @@ def _render_profile_mapping_form(
         composite_name_mode=NAME_MODE_COMPOSITE,
         current_profile_filters=control_state.current_profile_filters,
         strip_leading_zeros_from_sku=control_state.strip_leading_zeros_from_sku,
-        ignore_rows_missing_sku=control_state.ignore_rows_missing_sku,
     )
     if preview_decision.blocking_error:
         st.error(preview_decision.blocking_error)
@@ -89,7 +88,6 @@ def _render_profile_mapping_form(
             composite_fields=control_state.composite_fields,
             current_profile_filters=control_state.current_profile_filters,
             strip_leading_zeros_from_sku=control_state.strip_leading_zeros_from_sku,
-            ignore_rows_missing_sku=control_state.ignore_rows_missing_sku,
         )
     except Exception as exc:
         st.error(str(exc))
@@ -134,8 +132,8 @@ def _render_profile_mapping_form(
         st.success("Kolumnmappningen \u00e4r komplett. F\u00f6rhandsvisning finns nedan.")
     st.caption(
         "SKU-regler i f\u00f6rhandsvisningen: "
-        f"ta bort inledande nollor = {'Ja' if control_state.strip_leading_zeros_from_sku else 'Nej'}, "
-        f"ignorera rader utan SKU = {'Ja' if control_state.ignore_rows_missing_sku else 'Nej'}."
+        f"ta bort inledande nollor = {'Ja' if control_state.strip_leading_zeros_from_sku else 'Nej'}. "
+        'Rader utan SKU anv\u00e4nder "Lev.artnr" som reserv om b\u00e5da kolumnerna \u00e4r mappade.'
     )
     st.caption(
         "Varum\u00e4rkesfilter i f\u00f6rhandsvisningen: "

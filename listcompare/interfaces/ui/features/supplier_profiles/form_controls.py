@@ -6,12 +6,12 @@ from pathlib import Path
 import streamlit as st
 
 from listcompare.core.suppliers.profile import (
+    SUPPLIER_HICORE_ARTICLE_NUMBER_COLUMN,
     SUPPLIER_HICORE_NAME_COLUMN,
     SUPPLIER_HICORE_RENAME_COLUMNS,
     SUPPLIER_HICORE_SKU_COLUMN,
     SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN,
     SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES,
-    SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU,
     SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS,
     normalize_supplier_transform_profile_filters as _normalize_supplier_transform_profile_filters,
 )
@@ -30,7 +30,6 @@ class ProfileFormControls:
     composite_fields: dict[str, list[str]]
     current_profile_filters: dict[str, object]
     strip_leading_zeros_from_sku: bool
-    ignore_rows_missing_sku: bool
 
 
 def _seed_source_widget(
@@ -193,26 +192,22 @@ def _render_sku_rule_controls(
     file_token: str,
     saved_profile_options: dict[str, bool],
     should_seed_defaults: bool,
-) -> tuple[bool, bool]:
+) -> bool:
     st.subheader("SKU-regler")
     st.caption(f'G\u00e4ller kolumnen "{SUPPLIER_HICORE_SKU_COLUMN}" n\u00e4r den \u00e4r mappad.')
+    st.caption(
+        f'Rader utan "{SUPPLIER_HICORE_SKU_COLUMN}" anv\u00e4nder "{SUPPLIER_HICORE_ARTICLE_NUMBER_COLUMN}" '
+        "som reserv om b\u00e5da kolumnerna \u00e4r mappade. Rader utan b\u00e5da f\u00e4lten utel\u00e4mnas."
+    )
     strip_zeros_key = f"supplier_transform_option_strip_zeros_{file_token}"
-    ignore_missing_sku_key = f"supplier_transform_option_ignore_missing_sku_{file_token}"
     if should_seed_defaults or strip_zeros_key not in st.session_state:
         st.session_state[strip_zeros_key] = saved_profile_options[
             SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS
         ]
-    if should_seed_defaults or ignore_missing_sku_key not in st.session_state:
-        st.session_state[ignore_missing_sku_key] = saved_profile_options[
-            SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU
-        ]
     strip_leading_zeros_from_sku = bool(
         st.checkbox("Ta bort inledande nollor i SKU", key=strip_zeros_key)
     )
-    ignore_rows_missing_sku = bool(
-        st.checkbox("Ignorera rader som saknar SKU", key=ignore_missing_sku_key)
-    )
-    return strip_leading_zeros_from_sku, ignore_rows_missing_sku
+    return strip_leading_zeros_from_sku
 
 
 def _render_brand_filter_controls(
@@ -321,7 +316,7 @@ def render_profile_form_controls(
         should_seed_defaults=should_seed_defaults,
         target_to_source=target_to_source,
     )
-    strip_leading_zeros_from_sku, ignore_rows_missing_sku = _render_sku_rule_controls(
+    strip_leading_zeros_from_sku = _render_sku_rule_controls(
         file_token=file_token,
         saved_profile_options=saved_profile_options,
         should_seed_defaults=should_seed_defaults,
@@ -343,5 +338,4 @@ def render_profile_form_controls(
         composite_fields=composite_fields,
         current_profile_filters=current_profile_filters,
         strip_leading_zeros_from_sku=strip_leading_zeros_from_sku,
-        ignore_rows_missing_sku=ignore_rows_missing_sku,
     )

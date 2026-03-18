@@ -27,7 +27,6 @@ class SupplierProfileFormLogicTests(unittest.TestCase):
             composite_name_mode="composite",
             current_profile_filters=dict(SUPPLIER_TRANSFORM_DEFAULT_FILTERS),
             strip_leading_zeros_from_sku=False,
-            ignore_rows_missing_sku=False,
         )
 
         self.assertIsNotNone(result.blocking_error)
@@ -45,7 +44,6 @@ class SupplierProfileFormLogicTests(unittest.TestCase):
             composite_name_mode="composite",
             current_profile_filters=dict(SUPPLIER_TRANSFORM_DEFAULT_FILTERS),
             strip_leading_zeros_from_sku=False,
-            ignore_rows_missing_sku=False,
         )
 
         self.assertIsNone(result.blocking_error)
@@ -62,7 +60,6 @@ class SupplierProfileFormLogicTests(unittest.TestCase):
             composite_name_mode="composite",
             current_profile_filters=dict(SUPPLIER_TRANSFORM_DEFAULT_FILTERS),
             strip_leading_zeros_from_sku=True,
-            ignore_rows_missing_sku=False,
         )
 
         self.assertIsNone(result.blocking_error)
@@ -79,7 +76,6 @@ class SupplierProfileFormLogicTests(unittest.TestCase):
             },
             composite_fields={SUPPLIER_HICORE_NAME_COLUMN: []},
             strip_leading_zeros_from_sku=True,
-            ignore_rows_missing_sku=False,
         )
 
         self.assertEqual(
@@ -91,7 +87,7 @@ class SupplierProfileFormLogicTests(unittest.TestCase):
         )
         self.assertEqual(result.composite_fields, {})
         self.assertTrue(result.options["strip_leading_zeros_from_sku"])
-        self.assertFalse(result.options["ignore_rows_missing_sku"])
+        self.assertEqual(result.options, {"strip_leading_zeros_from_sku": True})
 
     def test_build_profile_save_state_detects_complete_saved_profile(self) -> None:
         current_mapping = {
@@ -141,7 +137,6 @@ class SupplierProfileFormLogicTests(unittest.TestCase):
             composite_fields={},
             current_profile_filters=dict(SUPPLIER_TRANSFORM_DEFAULT_FILTERS),
             strip_leading_zeros_from_sku=True,
-            ignore_rows_missing_sku=False,
         )
 
         self.assertEqual(result.renamed_df[SUPPLIER_HICORE_NAME_COLUMN].tolist(), ["Speaker"])

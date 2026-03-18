@@ -5,6 +5,7 @@ from typing import Optional
 import pandas as pd
 
 from .constants import (
+    SUPPLIER_HICORE_ARTICLE_NUMBER_COLUMN,
     SUPPLIER_HICORE_RENAME_COLUMNS,
     SUPPLIER_HICORE_SKU_COLUMN,
     SUPPLIER_HICORE_SUPPLIER_COLUMN,
@@ -60,6 +61,20 @@ def _build_composite_supplier_value(row: pd.Series, *, source_columns: list[str]
     return " ".join(part for part in parts if part != "")
 
 
+def _normalized_identifier_values(
+    df_supplier: pd.DataFrame,
+    *,
+    source_column: str,
+    strip_leading_zeros_from_sku: bool,
+) -> pd.Series:
+    return df_supplier[source_column].map(
+        lambda raw_value: normalize_supplier_transform_sku_value(
+            raw_value,
+            strip_leading_zeros=strip_leading_zeros_from_sku,
+        )
+    )
+
+
 def build_supplier_hicore_renamed_copy(
     df_supplier: pd.DataFrame,
     *,
@@ -69,7 +84,6 @@ def build_supplier_hicore_renamed_copy(
     brand_source_column: str = "",
     excluded_brand_values: Optional[list[str]] = None,
     strip_leading_zeros_from_sku: bool = False,
-    ignore_rows_missing_sku: bool = False,
     source_row_column: str = "",
 ) -> pd.DataFrame:
     normalized_target_to_source = {
@@ -135,15 +149,26 @@ def build_supplier_hicore_renamed_copy(
 
     sku_source_column = normalized_target_to_source.get(SUPPLIER_HICORE_SKU_COLUMN)
     if sku_source_column is not None:
-        normalized_sku_values = prepared_df[sku_source_column].map(
-            lambda raw_value: normalize_supplier_transform_sku_value(
-                raw_value,
-                strip_leading_zeros=strip_leading_zeros_from_sku,
-            )
+        normalized_sku_values = _normalized_identifier_values(
+            prepared_df,
+            source_column=sku_source_column,
+            strip_leading_zeros_from_sku=strip_leading_zeros_from_sku,
         )
+        article_number_source_column = normalized_target_to_source.get(
+            SUPPLIER_HICORE_ARTICLE_NUMBER_COLUMN
+        )
+        if article_number_source_column is not None:
+            normalized_article_number_values = _normalized_identifier_values(
+                prepared_df,
+                source_column=article_number_source_column,
+                strip_leading_zeros_from_sku=strip_leading_zeros_from_sku,
+            )
+            normalized_sku_values = normalized_sku_values.where(
+                normalized_sku_values != "",
+                normalized_article_number_values,
+            )
         prepared_df.loc[:, sku_source_column] = normalized_sku_values
-        if ignore_rows_missing_sku:
-            prepared_df = prepared_df.loc[normalized_sku_values != ""].copy()
+        prepared_df = prepared_df.loc[normalized_sku_values != ""].copy()
 
     renamed_df = pd.DataFrame(index=prepared_df.index)
     ordered_targets: list[str] = []

@@ -10,7 +10,6 @@ from listcompare.core.suppliers.profile import (
     SUPPLIER_HICORE_SKU_COLUMN,
     SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN,
     SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES,
-    SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU,
     SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS,
     build_supplier_hicore_renamed_copy as _build_supplier_hicore_renamed_copy,
     find_duplicate_names as _find_duplicate_names,
@@ -58,7 +57,6 @@ def evaluate_profile_preview(
     composite_name_mode: str,
     current_profile_filters: dict[str, object],
     strip_leading_zeros_from_sku: bool,
-    ignore_rows_missing_sku: bool,
 ) -> ProfilePreviewDecision:
     duplicate_name_sources = _find_duplicate_names(composite_name_sources)
     if duplicate_name_sources:
@@ -127,7 +125,7 @@ def evaluate_profile_preview(
         show_missing_target_info=bool(missing_target_columns),
         show_sku_rule_info=(
             SUPPLIER_HICORE_SKU_COLUMN not in target_to_source
-            and (strip_leading_zeros_from_sku or ignore_rows_missing_sku)
+            and strip_leading_zeros_from_sku
         ),
     )
 
@@ -145,7 +143,6 @@ def build_profile_preview_artifacts(
     composite_fields: dict[str, list[str]],
     current_profile_filters: dict[str, object],
     strip_leading_zeros_from_sku: bool,
-    ignore_rows_missing_sku: bool,
 ) -> ProfilePreviewArtifacts:
     renamed_df = _build_supplier_hicore_renamed_copy(
         df_supplier,
@@ -160,13 +157,11 @@ def build_profile_preview_artifacts(
             for value in current_profile_filters[SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES]
         ],
         strip_leading_zeros_from_sku=strip_leading_zeros_from_sku,
-        ignore_rows_missing_sku=ignore_rows_missing_sku,
     )
     current_profile_state = build_current_profile_state(
         target_to_source=target_to_source,
         composite_fields=composite_fields,
         strip_leading_zeros_from_sku=strip_leading_zeros_from_sku,
-        ignore_rows_missing_sku=ignore_rows_missing_sku,
     )
     save_state = build_profile_save_state(
         selected_supplier_name=selected_supplier_name,
@@ -192,7 +187,6 @@ def build_current_profile_state(
     target_to_source: dict[str, str],
     composite_fields: dict[str, list[str]],
     strip_leading_zeros_from_sku: bool,
-    ignore_rows_missing_sku: bool,
 ) -> CurrentProfileState:
     current_profile_mapping = {
         target_column: target_to_source[target_column]
@@ -207,7 +201,6 @@ def build_current_profile_state(
     current_profile_options = _normalize_supplier_transform_profile_options(
         {
             SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS: strip_leading_zeros_from_sku,
-            SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU: ignore_rows_missing_sku,
         }
     )
     return CurrentProfileState(

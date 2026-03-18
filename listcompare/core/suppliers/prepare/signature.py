@@ -7,7 +7,6 @@ from typing import Optional
 from ..profile import (
     SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN,
     SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES,
-    SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU,
     SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS,
     normalize_supplier_transform_profile_composite_fields,
     normalize_supplier_transform_profile_filters,
@@ -65,9 +64,6 @@ def supplier_prepare_signature(
         "profile_options": {
             SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS: bool(
                 normalized_profile_options[SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS]
-            ),
-            SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU: bool(
-                normalized_profile_options[SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU]
             ),
         },
     }

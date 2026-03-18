@@ -6,18 +6,20 @@ import pandas as pd
 import streamlit as st
 
 from listcompare.core.suppliers.profile import (
+    SUPPLIER_HICORE_ARTICLE_NUMBER_COLUMN,
     SUPPLIER_HICORE_SUPPLIER_COLUMN,
     SUPPLIER_TRANSFORM_FILTER_BRAND_SOURCE_COLUMN,
     SUPPLIER_TRANSFORM_FILTER_EXCLUDED_BRAND_VALUES,
-    SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU,
     SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS,
 )
 from ...common import (
-    SUPPLIER_INDEX_PATH,
     SUPPLIER_PROFILE_MODE_OVERVIEW,
-    SUPPLIER_TRANSFORM_PROFILES_PATH,
 )
 from ...io.uploads import _read_supplier_upload
+from ...runtime_paths import (
+    supplier_index_path as _supplier_index_path,
+    supplier_transform_profiles_path as _supplier_transform_profiles_path,
+)
 from ...session.file_inputs import render_file_input as _render_file_input
 from ...session.navigation import rerun as _rerun
 from ...session.profile_state import (
@@ -46,6 +48,8 @@ def _render_supplier_profile_editor(
     supplier_options: list[str],
     supplier_index_error: Optional[str],
 ) -> None:
+    supplier_index_path = _supplier_index_path()
+    supplier_profiles_path = _supplier_transform_profiles_path()
     normalized_transform_supplier = _normalize_selected_supplier_for_options(
         st.session_state.get("supplier_internal_name"),
         supplier_options,
@@ -79,22 +83,22 @@ def _render_supplier_profile_editor(
 
     if supplier_index_error:
         st.warning(
-            f"Kunde inte l\u00e4sa {SUPPLIER_INDEX_PATH.name} vid uppstart: {supplier_index_error}"
+            f"Kunde inte l\u00e4sa {supplier_index_path.name} vid uppstart: {supplier_index_error}"
         )
     if st.session_state.get("supplier_transform_profiles_load_error"):
         st.warning(
             "Kunde inte l\u00e4sa "
-            f"{SUPPLIER_TRANSFORM_PROFILES_PATH.name} vid uppstart: "
+            f"{supplier_profiles_path.name} vid uppstart: "
             f"{st.session_state['supplier_transform_profiles_load_error']}"
         )
     if st.session_state.get("supplier_transform_profiles_save_error"):
         st.warning(
-            f"Kunde inte spara {SUPPLIER_TRANSFORM_PROFILES_PATH.name}: "
+            f"Kunde inte spara {supplier_profiles_path.name}: "
             f"{st.session_state['supplier_transform_profiles_save_error']}"
         )
     if not supplier_options:
         st.warning(
-            f"Inga leverant\u00f6rer hittades i {SUPPLIER_INDEX_PATH.name}. L\u00e4gg till leverant\u00f6rer f\u00f6rst."
+            f"Inga leverant\u00f6rer hittades i {supplier_index_path.name}. L\u00e4gg till leverant\u00f6rer f\u00f6rst."
         )
         return
     supplier_internal_name = st.selectbox(
@@ -192,8 +196,8 @@ def _render_supplier_profile_editor(
             )
             st.caption(
                 "SKU-regler: "
-                f"ta bort inledande nollor = {'Ja' if saved_profile_options[SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS] else 'Nej'}, "
-                f"ignorera rader utan SKU = {'Ja' if saved_profile_options[SUPPLIER_TRANSFORM_OPTION_IGNORE_ROWS_MISSING_SKU] else 'Nej'}."
+                f"ta bort inledande nollor = {'Ja' if saved_profile_options[SUPPLIER_TRANSFORM_OPTION_STRIP_LEADING_ZEROS] else 'Nej'}. "
+                f'Rader utan SKU använder "{SUPPLIER_HICORE_ARTICLE_NUMBER_COLUMN}" som reserv om båda kolumnerna är mappade.'
             )
             filter_summary = _supplier_profile_filter_summary(saved_filters)
             if filter_summary is not None:
