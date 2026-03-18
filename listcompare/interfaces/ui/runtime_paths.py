@@ -1,3 +1,5 @@
+"""Runtime storage paths for data that should survive between app launches."""
+
 from __future__ import annotations
 
 import os
@@ -48,22 +50,32 @@ def _default_data_dir(
 
 
 def app_data_dir() -> Path:
+    """Return the persistent app-data directory for the current runtime."""
+
     return _default_data_dir()
 
 
 def supplier_index_path() -> Path:
+    """Return the persisted supplier index file path."""
+
     return app_data_dir() / "supplier_index.txt"
 
 
 def brand_index_path() -> Path:
+    """Return the persisted brand index file path."""
+
     return app_data_dir() / "brand_index.txt"
 
 
 def ui_settings_path() -> Path:
+    """Return the persisted UI settings file path."""
+
     return app_data_dir() / "ui_settings.json"
 
 
 def supplier_transform_profiles_path() -> Path:
+    """Return the persisted supplier transform profile file path."""
+
     return app_data_dir() / "supplier_transform_profiles.json"
 
 
@@ -110,6 +122,8 @@ def _initialize_runtime_storage(
 
 
 def ensure_runtime_storage_initialized() -> None:
+    """Create the runtime data directory and seed missing persistent files."""
+
     data_dir = app_data_dir()
     _initialize_runtime_storage(
         data_dir=data_dir,

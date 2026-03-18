@@ -1,3 +1,5 @@
+"""UI service helpers for supplier compare previews and export files."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -49,6 +51,8 @@ def _build_supplier_price_export_df(
     include_purchase: bool,
     hicore_skus_by_normalized_sku: Optional[dict[str, str]] = None,
 ) -> pd.DataFrame:
+    """Build a supplier price export and prefer the HiCore SKU representation."""
+
     sku_column_name = HICORE_COLUMNS["sku"]
     price_column_name = HICORE_COLUMNS["price"]
     purchase_column_name = _hicore_purchase_column_name()
@@ -86,6 +90,8 @@ def _build_supplier_price_export_df(
 def _hicore_skus_by_normalized_sku(
     mismatch_map: dict[str, dict[str, list[Product]]],
 ) -> dict[str, str]:
+    """Map each normalized mismatch SKU to the first non-empty HiCore SKU value."""
+
     hicore_skus: dict[str, str] = {}
     for normalized_sku, sides in mismatch_map.items():
         for product in sides.get("hicore", []):
@@ -105,6 +111,8 @@ def compute_supplier_result(
     profile_excluded_normalized_skus: Optional[set[str]] = None,
     progress_callback: Optional[ProgressCallback] = None,
 ) -> SupplierUiResult:
+    """Compute supplier compare previews and export payloads for the UI."""
+
     _notify_progress(progress_callback, 0.05, "Läser HiCore-fil")
     df_hicore = _uploaded_csv_to_df(hicore_bytes, sep=";")
     _notify_progress(progress_callback, 0.15, "Bygger HiCore-karta")

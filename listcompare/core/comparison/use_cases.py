@@ -1,3 +1,5 @@
+"""Application-layer comparison use cases for product-map workflows."""
+
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -16,6 +18,8 @@ MismatchMap = dict[str, dict[str, list[Product]]]
 
 @dataclass(frozen=True)
 class ComparisonResults:
+    """Buckets returned by the HiCore versus Magento comparison flow."""
+
     only_in_hicore: ProductMap
     only_in_magento: ProductMap
     stock_mismatches: MismatchMap
@@ -24,6 +28,8 @@ class ComparisonResults:
 
 @dataclass(frozen=True)
 class SupplierComparisonResults:
+    """Buckets returned by the supplier-versus-HiCore comparison flow."""
+
     outgoing: ProductMap
     new_products: ProductMap
     price_updates_out_of_stock: MismatchMap
@@ -33,6 +39,8 @@ class SupplierComparisonResults:
 
 @dataclass(frozen=True)
 class SupplierArticleNumberReviewMatch:
+    """Potential HiCore-supplier match found via article number instead of SKU."""
+
     normalized_article_number: str
     article_number: str
     hicore_rows: tuple[Product, ...]
@@ -103,6 +111,8 @@ def filter_products_by_supplier_with_sku(
     hicore_map: ProductMap,
     supplier_name: str,
 ) -> ProductMap:
+    """Keep HiCore rows for one supplier and drop entries without a usable SKU."""
+
     target = supplier_name.casefold()
     comparable: ProductMap = {}
     for sku, rows in hicore_map.items():
@@ -119,6 +129,8 @@ def filter_product_map_by_excluded_normalized_skus(
     product_map: ProductMap,
     excluded_normalized_skus: set[str],
 ) -> ProductMap:
+    """Drop rows whose normalized SKU belongs to the supplied exclusion set."""
+
     if not excluded_normalized_skus:
         return product_map
 
@@ -138,6 +150,8 @@ def build_comparison_results(
     supplier_internal_name: str = "EM Nordic",
     excluded_normalized_skus: Optional[set[str]] = None,
 ) -> ComparisonResults:
+    """Build the compare buckets that drive the core HiCore-Magento UI."""
+
     excluded_set = {sku for sku in (excluded_normalized_skus or set()) if sku != ""}
     if excluded_set:
         hicore_map = filter_product_map_by_excluded_normalized_skus(hicore_map, excluded_set)
@@ -182,6 +196,8 @@ def build_supplier_comparison_results(
     supplier_internal_name: str,
     excluded_normalized_skus: Optional[set[str]] = None,
 ) -> SupplierComparisonResults:
+    """Build supplier compare buckets, including article-number review matches."""
+
     excluded_set = {sku for sku in (excluded_normalized_skus or set()) if sku != ""}
     if excluded_set:
         hicore_map = filter_product_map_by_excluded_normalized_skus(hicore_map, excluded_set)
@@ -237,6 +253,8 @@ def build_supplier_comparison_results(
 
 
 def unique_sorted_skus_from_product_map(product_map: ProductMap) -> list[str]:
+    """Return distinct non-empty SKUs from a product map in stable sorted order."""
+
     skus: list[str] = []
     for rows in product_map.values():
         skus.extend(p.sku for p in rows if (p.sku or "").strip() != "")
@@ -247,6 +265,8 @@ def unique_sorted_skus_from_mismatch_side(
     mismatch_map: MismatchMap,
     side: str,
 ) -> list[str]:
+    """Return distinct non-empty SKUs from one side of a mismatch map."""
+
     skus: list[str] = []
     for sides in mismatch_map.values():
         skus.extend(p.sku for p in sides.get(side, []) if (p.sku or "").strip() != "")

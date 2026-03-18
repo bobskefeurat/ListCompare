@@ -63,6 +63,14 @@ The root file `app.py` is an entrypoint that forwards to `listcompare/interfaces
 - Optional: pass `-InstallBuildDeps` and/or `-PythonExe <full path to python.exe>` to `build_exe.ps1`
 - Optional: set `LISTCOMPARE_OPEN_BROWSER=0` before launch if you want the packaged app to stay headless
 
+## API Docs
+
+- Install build dependencies: `python -m pip install -r requirements.txt -r requirements-build.txt`
+- Generate static API docs: `powershell -ExecutionPolicy Bypass -File .\build_api_docs.ps1`
+- Output: `build\api-docs\index.html`
+- The generated pages are driven by package/module docstrings plus public symbols re-exported from package `__init__.py` files
+- Optional: pass `-InstallBuildDeps` and/or `-PythonExe <full path to python.exe>` to `build_api_docs.ps1`
+
 ## Tests
 
 - Run all tests: `python -m unittest discover -s tests -p "test_*.py"`

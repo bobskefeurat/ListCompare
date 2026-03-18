@@ -1,1 +1,1 @@
-"""User interfaces (Streamlit UI)."""
+"""User-interface packages for ListCompare."""

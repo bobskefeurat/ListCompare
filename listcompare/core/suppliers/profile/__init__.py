@@ -1,3 +1,5 @@
+"""Public supplier profile constants, normalization, validation, and transforms."""
+
 from .constants import (
     SUPPLIER_HICORE_ARTICLE_NUMBER_COLUMN,
     SUPPLIER_HICORE_NAME_COLUMN,

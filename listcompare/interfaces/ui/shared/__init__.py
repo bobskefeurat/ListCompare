@@ -1,1 +1,1 @@
-﻿"""Shared UI helpers package."""
+"""Shared presentation helpers for the Streamlit UI."""

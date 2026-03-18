@@ -1,2 +1,1 @@
-"""ListCompare package."""
-
+"""ListCompare application package."""

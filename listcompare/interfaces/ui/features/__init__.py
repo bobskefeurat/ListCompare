@@ -1,2 +1,1 @@
-﻿"""UI service modules for Streamlit interface."""
-
+"""Feature-level Streamlit UI flows and page sections."""

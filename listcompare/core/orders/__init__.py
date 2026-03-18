@@ -1,3 +1,5 @@
+"""Public helpers for Magento-only web-order comparisons."""
+
 from .web_order_compare import (
     MagentoOnlyWebOrdersResult,
     build_magento_only_web_orders_result,

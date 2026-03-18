@@ -1,12 +1,15 @@
-﻿import pandas as pd
+"""Product normalization, diffing, mapping, and Magento repair helpers."""
+
+import pandas as pd
+
 
 def _to_str(x) -> str:
     if pd.isna(x):
         return ""
     return str(x).strip()
 
-def repair_shifted_magento_rows(df_magento: pd.DataFrame) -> tuple[pd.DataFrame, int]:
 
+def repair_shifted_magento_rows(df_magento: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     df = df_magento.copy()
     fixed = 0
 
@@ -55,4 +58,3 @@ def repair_shifted_magento_rows(df_magento: pd.DataFrame) -> tuple[pd.DataFrame,
 def repair_magento_shift_rows_v1(df_magento: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     # Backward-compatible alias.
     return repair_shifted_magento_rows(df_magento)
-

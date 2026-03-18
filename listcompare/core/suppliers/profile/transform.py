@@ -1,3 +1,5 @@
+"""Helpers for reshaping supplier files into the HiCore column model."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -21,6 +23,8 @@ from .validation import _profile_required_source_columns
 
 
 def find_duplicate_names(values: list[str]) -> list[str]:
+    """Return duplicate names once each, sorted case-insensitively."""
+
     counts: dict[str, int] = {}
     duplicates: list[str] = []
     for value in values:
@@ -35,6 +39,8 @@ def normalize_supplier_transform_sku_value(
     *,
     strip_leading_zeros: bool,
 ) -> str:
+    """Normalize an imported identifier while optionally stripping leading zeros."""
+
     if pd.isna(raw_value):
         return ""
     value = str(raw_value).strip()
@@ -86,6 +92,12 @@ def build_supplier_hicore_renamed_copy(
     strip_leading_zeros_from_sku: bool = False,
     source_row_column: str = "",
 ) -> pd.DataFrame:
+    """Project a supplier sheet into HiCore columns using profile mapping rules.
+
+    Missing SKU values can fall back to the mapped article number column after the
+    same normalization rules have been applied.
+    """
+
     normalized_target_to_source = {
         str(target).strip(): str(source).strip()
         for target, source in target_to_source.items()

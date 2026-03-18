@@ -1,3 +1,5 @@
+"""Public comparison use cases and result models."""
+
 from .use_cases import (
     ComparisonResults,
     SupplierArticleNumberReviewMatch,

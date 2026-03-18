@@ -1,3 +1,5 @@
+"""Launcher for running the bundled Streamlit UI as a desktop-style app."""
+
 from __future__ import annotations
 
 import asyncio
@@ -20,6 +22,8 @@ OPEN_BROWSER_ENV_VAR = "LISTCOMPARE_OPEN_BROWSER"
 
 
 def resource_root(*, frozen: bool | None = None, meipass: str | None = None) -> Path:
+    """Return the directory that contains bundled runtime resources."""
+
     current_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
     if current_frozen:
         bundle_root = meipass
@@ -32,11 +36,15 @@ def resource_root(*, frozen: bool | None = None, meipass: str | None = None) -> 
 
 
 def streamlit_app_path(*, root: Path | None = None) -> Path:
+    """Resolve the bundled Streamlit entrypoint path."""
+
     base_root = resource_root() if root is None else root
     return (base_root / STREAMLIT_APP_FILE).resolve()
 
 
 def open_browser_enabled(*, env: Mapping[str, str] | None = None) -> bool:
+    """Return whether the launcher should open a browser window by default."""
+
     env_map = os.environ if env is None else env
     raw_value = str(env_map.get(OPEN_BROWSER_ENV_VAR, "")).strip().casefold()
     if raw_value in {"0", "false", "no", "off"}:
@@ -49,6 +57,8 @@ def auto_shutdown_seconds(
     env: Mapping[str, str] | None = None,
     open_browser: bool | None = None,
 ) -> float | None:
+    """Resolve the idle shutdown timeout, or ``None`` when it is disabled."""
+
     env_map = os.environ if env is None else env
     raw_value = str(env_map.get(AUTO_SHUTDOWN_ENV_VAR, "")).strip()
     if raw_value != "":
@@ -64,6 +74,8 @@ def auto_shutdown_seconds(
 
 
 def runtime_flag_options(*, open_browser: bool | None = None) -> dict[str, object]:
+    """Build Streamlit runtime flags for the packaged launcher environment."""
+
     open_browser_value = open_browser_enabled() if open_browser is None else open_browser
     return {
         "server_headless": not open_browser_value,
@@ -107,6 +119,8 @@ def start_server_shutdown_monitor(
     server: object,
     stop_after_seconds: float | None,
 ) -> threading.Thread | None:
+    """Start a background thread that stops the server after idle timeout."""
+
     if stop_after_seconds is None:
         return None
 
@@ -124,6 +138,8 @@ def start_server_shutdown_monitor(
 
 
 def main() -> None:
+    """Bootstrap and run the packaged Streamlit server."""
+
     main_script_path = streamlit_app_path()
     if not main_script_path.exists():
         raise FileNotFoundError(

@@ -1,3 +1,5 @@
+"""Public supplier preparation and transform helpers."""
+
 from .prepare import (
     SUPPLIER_PREPARE_IGNORE_GROUP,
     SupplierConflictCandidate,

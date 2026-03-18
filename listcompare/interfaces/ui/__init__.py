@@ -1,1 +1,1 @@
-"""UI service modules for Streamlit interface."""
+"""Streamlit UI package and supporting modules."""

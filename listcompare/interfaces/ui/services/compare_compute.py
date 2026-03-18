@@ -1,3 +1,5 @@
+"""UI service helpers for HiCore-Magento compare results and exports."""
+
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
@@ -70,6 +72,8 @@ def _only_in_hicore_web_visible_in_stock_df(
     *,
     only_in_hicore_normalized_skus: set[str],
 ) -> tuple[pd.DataFrame, Optional[str]]:
+    """Build the extra HiCore-only tab for web-visible products that are in stock."""
+
     if not only_in_hicore_normalized_skus:
         return _empty_only_in_hicore_web_visible_df(), None
 
@@ -133,6 +137,8 @@ def compute_compare_result(
     excluded_brands: Optional[list[str]] = None,
     progress_callback: Optional[ProgressCallback] = None,
 ) -> CompareUiResult:
+    """Compute the main HiCore-Magento compare previews and CSV exports."""
+
     _notify_progress(progress_callback, 0.05, "Läser HiCore-fil")
     df_hicore = _uploaded_csv_to_df(hicore_bytes, sep=";")
     _notify_progress(progress_callback, 0.20, "Läser Magento-fil")
@@ -198,6 +204,8 @@ def compute_web_order_compare_result(
     *,
     progress_callback: Optional[ProgressCallback] = None,
 ) -> WebOrderCompareUiResult:
+    """Compute the Magento-only web-order export and preview table."""
+
     _notify_progress(progress_callback, 0.10, "Läser HiCore-fil")
     df_hicore = _uploaded_csv_to_df(hicore_bytes, sep=";")
     _notify_progress(progress_callback, 0.35, "Läser Magento-fil")
