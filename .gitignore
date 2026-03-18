@@ -16,6 +16,8 @@ ENV/
 .coverage
 htmlcov/
 tests/tmp_test/
+build/
+dist/
 
 # IDE and OS files
 .vscode/

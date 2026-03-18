@@ -3,16 +3,19 @@ from __future__ import annotations
 import streamlit as st
 
 from .common import (
-    BRAND_INDEX_PATH,
     MENU_COMPARE,
     MENU_SETTINGS,
     MENU_SUPPLIER,
-    SUPPLIER_INDEX_PATH,
 )
 from .io.index_names import _load_brands_from_index, _load_suppliers_from_index
 from .pages.compare import _render_compare_page
 from .pages.settings import _render_settings_page
 from .pages.supplier import _render_supplier_page
+from .runtime_paths import (
+    brand_index_path as _brand_index_path,
+    ensure_runtime_storage_initialized as _ensure_runtime_storage_initialized,
+    supplier_index_path as _supplier_index_path,
+)
 from .session.bootstrap import init_session_state as _init_session_state
 from .session.file_inputs import get_stored_file as _get_stored_file
 from .services.index_sync import (
@@ -22,6 +25,7 @@ from .services.index_sync import (
 
 def main() -> None:
     st.set_page_config(page_title="ListCompare", layout="wide")
+    _ensure_runtime_storage_initialized()
     _init_session_state(st.session_state)
 
     st.title("ListCompare")
@@ -31,8 +35,8 @@ def main() -> None:
         options=[MENU_COMPARE, MENU_SUPPLIER, MENU_SETTINGS],
     )
 
-    indexed_suppliers, supplier_index_error = _load_suppliers_from_index(SUPPLIER_INDEX_PATH)
-    indexed_brands, brand_index_error = _load_brands_from_index(BRAND_INDEX_PATH)
+    indexed_suppliers, supplier_index_error = _load_suppliers_from_index(_supplier_index_path())
+    indexed_brands, brand_index_error = _load_brands_from_index(_brand_index_path())
 
     index_sync_result = _sync_index_options_from_uploaded_hicore(
         indexed_suppliers=indexed_suppliers,

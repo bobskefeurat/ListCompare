@@ -3,13 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from ..common import BRAND_INDEX_PATH, SUPPLIER_INDEX_PATH
 from ..io.index_names import (
     _load_names_from_uploaded_hicore,
     _merge_brand_lists,
     _merge_supplier_lists,
     _save_brands_to_index,
     _save_suppliers_to_index,
+)
+from ..runtime_paths import (
+    brand_index_path as _brand_index_path,
+    supplier_index_path as _supplier_index_path,
 )
 
 
@@ -60,14 +63,14 @@ def sync_index_options_from_uploaded_hicore(
             uploaded_suppliers,
         )
         if new_supplier_names:
-            _save_suppliers_to_index(SUPPLIER_INDEX_PATH, supplier_options)
+            _save_suppliers_to_index(_supplier_index_path(), supplier_options)
 
         brand_options, new_brand_names = _merge_brand_lists(
             brand_options,
             uploaded_brands,
         )
         if new_brand_names:
-            _save_brands_to_index(BRAND_INDEX_PATH, brand_options)
+            _save_brands_to_index(_brand_index_path(), brand_options)
 
         hicore_missing_brand_column = not has_brand_column
     except Exception as exc:

@@ -11,8 +11,8 @@ from ....core.suppliers.profile import (
     ordered_supplier_transform_profile_composite_fields as _ordered_supplier_transform_profile_composite_fields,
     ordered_supplier_transform_profile_mapping as _ordered_supplier_transform_profile_mapping,
 )
-from ..common import SUPPLIER_TRANSFORM_PROFILES_PATH
 from ..persistence import profile_store as _profile_store
+from ..runtime_paths import supplier_transform_profiles_path as _supplier_transform_profiles_path
 
 
 def persist_supplier_transform_profile(
@@ -71,7 +71,7 @@ def persist_supplier_transform_profile(
     profiles[normalized_supplier_name] = profile_payload
 
     save_error = _profile_store.save_profiles(
-        SUPPLIER_TRANSFORM_PROFILES_PATH,
+        _supplier_transform_profiles_path(),
         profiles=profiles,
     )
     session_state["supplier_transform_profiles_save_error"] = save_error
@@ -117,7 +117,7 @@ def delete_supplier_transform_profile(
         profiles[name] = normalized_profile
 
     save_error = _profile_store.save_profiles(
-        SUPPLIER_TRANSFORM_PROFILES_PATH,
+        _supplier_transform_profiles_path(),
         profiles=profiles,
     )
     session_state["supplier_transform_profiles_save_error"] = save_error

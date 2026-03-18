@@ -10,7 +10,7 @@ from listcompare.core.suppliers.profile import (
     SUPPLIER_HICORE_SKU_COLUMN,
     profile_has_required_sku_mapping as _profile_has_required_sku_mapping,
 )
-from ...common import SUPPLIER_INDEX_PATH
+from ...runtime_paths import supplier_index_path as _supplier_index_path
 from ...session.file_inputs import render_file_input as _render_file_input
 from ...session.navigation import (
     request_supplier_profile_editor as _request_supplier_profile_editor,
@@ -48,6 +48,7 @@ def _render_supplier_compare_tab(
     new_supplier_names: list[str],
     excluded_brands: list[str],
 ) -> None:
+    supplier_index_path = _supplier_index_path()
     normalized_compare_supplier = _normalize_selected_supplier_for_options(
         st.session_state.get("supplier_internal_name"),
         supplier_options,
@@ -265,11 +266,11 @@ def _render_supplier_compare_tab(
     st.caption(f"Antal leverantörer: {len(supplier_options)}")
     if new_supplier_names:
         st.success(
-            f"Uppdaterade {SUPPLIER_INDEX_PATH.name} med {len(new_supplier_names)} ny(a) leverantör(er) från HiCore."
+            f"Uppdaterade {supplier_index_path.name} med {len(new_supplier_names)} ny(a) leverantör(er) från HiCore."
         )
     if supplier_index_error:
         st.warning(
-            f"Kunde inte läsa {SUPPLIER_INDEX_PATH.name} vid uppstart: {supplier_index_error}"
+            f"Kunde inte läsa {supplier_index_path.name} vid uppstart: {supplier_index_error}"
         )
 
     if st.session_state["supplier_ui_error"]:

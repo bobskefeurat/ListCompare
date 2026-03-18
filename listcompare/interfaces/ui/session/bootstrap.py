@@ -5,17 +5,19 @@ from ..common import (
     FILE_STATE_KEYS,
     SUPPLIER_PAGE_VIEW_COMPARE,
     SUPPLIER_PROFILE_MODE_OVERVIEW,
-    SUPPLIER_TRANSFORM_PROFILES_PATH,
-    UI_SETTINGS_PATH,
 )
 from ..persistence import profile_store as _profile_store
+from ..runtime_paths import (
+    supplier_transform_profiles_path as _supplier_transform_profiles_path,
+    ui_settings_path as _ui_settings_path,
+)
 from .settings_state import load_ui_settings
 
 
 def init_session_state(session_state: dict[str, object]) -> None:
-    ui_settings, ui_settings_error = load_ui_settings(UI_SETTINGS_PATH)
+    ui_settings, ui_settings_error = load_ui_settings(_ui_settings_path())
     supplier_transform_profiles, supplier_transform_profiles_error = _profile_store.load_profiles(
-        SUPPLIER_TRANSFORM_PROFILES_PATH
+        _supplier_transform_profiles_path()
     )
 
     defaults: dict[str, object] = {

@@ -47,6 +47,22 @@ The project is organized into a clear package structure:
 
 The root file `app.py` is an entrypoint that forwards to `listcompare/interfaces/ui/app.py`.
 
+## App Data
+
+- Persistent app data is stored in `%LOCALAPPDATA%\\ListCompare` on Windows.
+- Override the storage directory with `LISTCOMPARE_DATA_DIR` when testing packaging or isolated runs locally.
+
+## Windows Build
+
+- Install build dependencies: `python -m pip install -r requirements.txt -r requirements-build.txt`
+- Build the onedir executable: `powershell -ExecutionPolicy Bypass -File .\build_exe.ps1`
+- Output: `dist\ListCompare\ListCompare.exe`
+- Distributable archive: `dist\ListCompare-windows.zip`
+- The packaged app must be distributed as the full `dist\ListCompare` folder or the generated zip archive, not as the `.exe` file alone
+- By default, the packaged app shuts itself down shortly after the last browser tab/window is closed; override with `LISTCOMPARE_AUTO_SHUTDOWN_SECONDS=0` if you explicitly want it to stay running
+- Optional: pass `-InstallBuildDeps` and/or `-PythonExe <full path to python.exe>` to `build_exe.ps1`
+- Optional: set `LISTCOMPARE_OPEN_BROWSER=0` before launch if you want the packaged app to stay headless
+
 ## Tests
 
 - Run all tests: `python -m unittest discover -s tests -p "test_*.py"`
