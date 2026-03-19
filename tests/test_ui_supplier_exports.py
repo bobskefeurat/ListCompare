@@ -47,6 +47,7 @@ class SupplierUiExportTests(unittest.TestCase):
     def test_supplier_exports_use_expected_columns_per_category(self) -> None:
         sku_col = HICORE_COLUMNS["sku"]
         name_col = HICORE_COLUMNS["name"]
+        brand_col = HICORE_COLUMNS["brand"]
         supplier_col = HICORE_COLUMNS["supplier"]
         total_col = HICORE_COLUMNS["total_stock"]
         reserved_col = HICORE_COLUMNS["reserved"]
@@ -91,6 +92,7 @@ class SupplierUiExportTests(unittest.TestCase):
                     **base_row,
                     sku_col: "100",
                     name_col: "SKU 100 supplier",
+                    brand_col: "Brand 100",
                     purchase_col: "5",
                     price_col: "11",
                     SUPPLIER_HICORE_SUPPLIER_COLUMN: "EM Nordic",
@@ -99,6 +101,7 @@ class SupplierUiExportTests(unittest.TestCase):
                     **base_row,
                     sku_col: "200",
                     name_col: "SKU 200 supplier",
+                    brand_col: "Brand 200",
                     purchase_col: "8",
                     price_col: "21",
                     SUPPLIER_HICORE_SUPPLIER_COLUMN: "EM Nordic",
@@ -107,6 +110,7 @@ class SupplierUiExportTests(unittest.TestCase):
                     **base_row,
                     sku_col: "400",
                     name_col: "SKU 400 supplier",
+                    brand_col: "Brand 400",
                     purchase_col: "12",
                     price_col: "40",
                     SUPPLIER_HICORE_SUPPLIER_COLUMN: "EM Nordic",
@@ -128,15 +132,24 @@ class SupplierUiExportTests(unittest.TestCase):
         self.assertEqual(new_products_export[sku_col].tolist(), ["400"])
 
         out_of_stock_export = _read_excel_bytes(result.price_updates_out_of_stock_excel_bytes)
-        self.assertEqual(out_of_stock_export.columns.tolist(), [sku_col, purchase_col, price_col])
+        self.assertEqual(
+            out_of_stock_export.columns.tolist(),
+            [sku_col, purchase_col, price_col, brand_col],
+        )
         self.assertEqual(out_of_stock_export[sku_col].tolist(), ["00100"])
         self.assertEqual(out_of_stock_export[purchase_col].tolist(), ["5"])
         self.assertEqual(out_of_stock_export[price_col].tolist(), ["11"])
+        self.assertEqual(out_of_stock_export[brand_col].tolist(), ["Brand 100"])
 
         in_stock_export = _read_excel_bytes(result.price_updates_in_stock_excel_bytes)
-        self.assertEqual(in_stock_export.columns.tolist(), [sku_col, price_col])
+        self.assertEqual(
+            in_stock_export.columns.tolist(),
+            [sku_col, purchase_col, price_col, brand_col],
+        )
         self.assertEqual(in_stock_export[sku_col].tolist(), ["00200"])
+        self.assertEqual(in_stock_export[purchase_col].tolist(), ["8"])
         self.assertEqual(in_stock_export[price_col].tolist(), ["21"])
+        self.assertEqual(in_stock_export[brand_col].tolist(), ["Brand 200"])
 
     def test_supplier_compare_applies_profile_transform_and_brand_filter(self) -> None:
         sku_col = HICORE_COLUMNS["sku"]
@@ -281,11 +294,10 @@ class SupplierUiExportTests(unittest.TestCase):
         self.assertNotIn("side", result.article_number_review_df.columns.tolist())
         self.assertEqual(result.article_number_review_df["source"].tolist(), ["hicore", "supplier"])
         review_export = _read_excel_bytes(result.article_number_review_excel_bytes)
-        self.assertNotIn("side", review_export.columns.tolist())
-        self.assertNotIn("reason", review_export.columns.tolist())
-        self.assertIn("Lev.artnr", review_export.columns.tolist())
-        self.assertEqual(review_export["Lev.artnr"].drop_duplicates().tolist(), ["ART-9"])
-        self.assertEqual(review_export["sku"].tolist(), ["OLD-1", "NEW-1"])
+        self.assertEqual(review_export.columns.tolist(), [sku_col, article_number_col, name_col])
+        self.assertEqual(review_export[sku_col].tolist(), ["NEW-1"])
+        self.assertEqual(review_export[article_number_col].tolist(), ["ART-9"])
+        self.assertEqual(review_export[name_col].tolist(), ["SKU new"])
 
     def test_supplier_compare_does_not_mark_profile_excluded_brand_as_outgoing(self) -> None:
         sku_col = HICORE_COLUMNS["sku"]

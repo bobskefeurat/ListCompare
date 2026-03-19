@@ -18,6 +18,8 @@ def _supplier_compare_export_file_name(*, supplier_name: str, label: str) -> str
 
 
 def _render_supplier_results(result: SupplierUiResult, *, supplier_name: str) -> None:
+    review_label = "SKU/Artikelnummer-diff"
+
     if result.warning_message:
         st.warning(result.warning_message)
 
@@ -45,7 +47,7 @@ def _render_supplier_results(result: SupplierUiResult, *, supplier_name: str) ->
     metric_col_2.metric("Nyheter", result.new_products_count)
     metric_col_3.metric("Prisuppdatering, Ej i lager", result.price_updates_out_of_stock_count)
     metric_col_4.metric("Prisuppdatering, I lager", result.price_updates_in_stock_count)
-    metric_col_5.metric("Behöver granskas", result.article_number_review_count)
+    metric_col_5.metric(review_label, result.article_number_review_count)
 
     tab_outgoing, tab_new, tab_price_oos, tab_price_in, tab_review = st.tabs(
         [
@@ -53,7 +55,7 @@ def _render_supplier_results(result: SupplierUiResult, *, supplier_name: str) ->
             "Nyheter",
             "Prisuppdatering, Ej i lager",
             "Prisuppdatering, I lager",
-            "Behöver granskas",
+            review_label,
         ]
     )
     with tab_outgoing:
@@ -122,11 +124,11 @@ def _render_supplier_results(result: SupplierUiResult, *, supplier_name: str) ->
     with tab_review:
         st.caption("Visar rader som inte matchade på SKU men där artikelnummer gav en möjlig eller otydlig koppling.")
         st.download_button(
-            label="Ladda ner Behöver granskas",
+            label=f"Ladda ner {review_label}",
             data=result.article_number_review_excel_bytes,
             file_name=_supplier_compare_export_file_name(
                 supplier_name=supplier_name,
-                label="Behover granskas",
+                label=review_label,
             ),
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="download_supplier_article_review_excel",
