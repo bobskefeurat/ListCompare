@@ -6,8 +6,10 @@ from ..common import (
     SUPPLIER_PAGE_VIEW_COMPARE,
     SUPPLIER_PROFILE_MODE_OVERVIEW,
 )
+from ..persistence import shared_sync_store as _shared_sync_store
 from ..persistence import profile_store as _profile_store
 from ..runtime_paths import (
+    shared_sync_config_path as _shared_sync_config_path,
     supplier_transform_profiles_path as _supplier_transform_profiles_path,
     ui_settings_path as _ui_settings_path,
 )
@@ -16,6 +18,9 @@ from .settings_state import load_ui_settings
 
 def init_session_state(session_state: dict[str, object]) -> None:
     ui_settings, ui_settings_error = load_ui_settings(_ui_settings_path())
+    shared_sync_config, shared_sync_config_error = _shared_sync_store.load_shared_sync_config(
+        _shared_sync_config_path()
+    )
     supplier_transform_profiles, supplier_transform_profiles_error = _profile_store.load_profiles(
         _supplier_transform_profiles_path()
     )
@@ -49,6 +54,12 @@ def init_session_state(session_state: dict[str, object]) -> None:
         "_last_supplier_internal_name": None,
         "ui_settings_load_error": ui_settings_error,
         "ui_settings_save_error": None,
+        "shared_sync_folder": str(shared_sync_config.get("shared_folder", "")).strip(),
+        "shared_sync_load_error": shared_sync_config_error,
+        "shared_sync_save_error": None,
+        "shared_sync_status_level": "disabled",
+        "shared_sync_status_message": None,
+        "shared_sync_profile_conflicts": (),
         "supplier_transform_profiles": dict(supplier_transform_profiles),
         "supplier_transform_profiles_load_error": supplier_transform_profiles_error,
         "supplier_transform_profiles_save_error": None,

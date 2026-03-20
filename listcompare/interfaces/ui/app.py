@@ -21,12 +21,17 @@ from .session.file_inputs import get_stored_file as _get_stored_file
 from .services.index_sync import (
     sync_index_options_from_uploaded_hicore as _sync_index_options_from_uploaded_hicore,
 )
+from .services.shared_sync import sync_shared_files as _sync_shared_files
 
 
 def main() -> None:
     st.set_page_config(page_title="ListCompare", layout="wide")
     _ensure_runtime_storage_initialized()
+    shared_sync_status = _sync_shared_files()
     _init_session_state(st.session_state)
+    st.session_state["shared_sync_status_level"] = shared_sync_status.level
+    st.session_state["shared_sync_status_message"] = shared_sync_status.message
+    st.session_state["shared_sync_profile_conflicts"] = shared_sync_status.profile_conflicts
 
     st.title("ListCompare")
     st.sidebar.title("Meny")

@@ -5,8 +5,10 @@ from typing import Optional
 import streamlit as st
 
 from ..common import MENU_SETTINGS
+from ..persistence import profile_store as _profile_store
 from ..runtime_paths import (
     brand_index_path as _brand_index_path,
+    supplier_transform_profiles_path as _supplier_transform_profiles_path,
     ui_settings_path as _ui_settings_path,
 )
 from ..session.file_inputs import get_stored_file as _get_stored_file
@@ -14,6 +16,108 @@ from ..session.run_state import clear_all_run_state as _clear_all_run_state
 from ..session.settings_state import (
     persist_excluded_brands_setting as _persist_excluded_brands_setting,
 )
+from ..services.shared_sync import (
+    find_shared_sync_folder_candidates as _find_shared_sync_folder_candidates,
+    save_configured_shared_folder as _save_configured_shared_folder,
+    sync_shared_files as _sync_shared_files,
+)
+
+
+def _apply_shared_sync_status(session_state: dict[str, object], *, level: str, message: str) -> None:
+    session_state["shared_sync_status_level"] = level
+    session_state["shared_sync_status_message"] = message
+
+
+def _reload_profiles_after_shared_sync() -> None:
+    supplier_profiles, supplier_profiles_error = _profile_store.load_profiles(
+        _supplier_transform_profiles_path()
+    )
+    st.session_state["supplier_transform_profiles"] = dict(supplier_profiles)
+    st.session_state["supplier_transform_profiles_load_error"] = supplier_profiles_error
+
+
+def _run_shared_sync_and_refresh() -> None:
+    sync_status = _sync_shared_files()
+    _apply_shared_sync_status(
+        st.session_state,
+        level=sync_status.level,
+        message=sync_status.message,
+    )
+    st.session_state["shared_sync_profile_conflicts"] = sync_status.profile_conflicts
+    _reload_profiles_after_shared_sync()
+    _clear_all_run_state(st.session_state)
+    st.rerun()
+
+
+def _render_shared_sync_settings() -> None:
+    st.subheader("Delad synk")
+    st.caption(
+        "Peka ut den gemensamma Drive-mappen som ska dela leverantörsprofiler samt "
+        "leverantörs- och varumärkesindex."
+    )
+    if "shared_sync_folder_widget" not in st.session_state:
+        st.session_state["shared_sync_folder_widget"] = str(
+            st.session_state.get("shared_sync_folder", "")
+        )
+
+    shared_sync_candidates = _find_shared_sync_folder_candidates()
+    configured_shared_folder = str(st.session_state.get("shared_sync_folder", "")).strip()
+    shared_sync_folder = configured_shared_folder
+    show_save_button = False
+    save_button_label = "Spara synkmapp"
+
+    if len(shared_sync_candidates) == 1:
+        shared_sync_folder = shared_sync_candidates[0]
+        st.info(f"Drive-mapp hittad automatiskt: {shared_sync_folder}")
+    elif shared_sync_candidates:
+        current_candidate = configured_shared_folder
+        if current_candidate in shared_sync_candidates:
+            candidate_index = shared_sync_candidates.index(current_candidate)
+        else:
+            candidate_index = 0
+        shared_sync_folder = st.selectbox(
+            "Hittade Drive-mappar",
+            options=shared_sync_candidates,
+            index=candidate_index,
+            key="shared_sync_folder_candidate",
+        )
+        st.caption("Välj mappen i listan om du vill byta aktiv delad synkmapp.")
+        show_save_button = True
+        save_button_label = "Använd vald mapp"
+    else:
+        st.caption("Ingen vanlig ListCompareShared-mapp hittades automatiskt. Ange sökvägen manuellt.")
+        shared_sync_folder = st.text_input(
+            "Drive-mapp för delad appdata",
+            key="shared_sync_folder_widget",
+            placeholder=r"G:\Min enhet\ListCompareShared",
+        ).strip()
+        show_save_button = True
+
+    sync_col, action_col = st.columns(2)
+    if sync_col.button("Synka nu", key="run_shared_sync_now"):
+        _run_shared_sync_and_refresh()
+    if show_save_button and action_col.button(save_button_label, key="save_shared_sync_folder"):
+        save_error = _save_configured_shared_folder(shared_sync_folder)
+        st.session_state["shared_sync_save_error"] = save_error
+        if save_error is None:
+            st.session_state["shared_sync_folder_widget"] = shared_sync_folder
+            st.session_state["shared_sync_folder"] = shared_sync_folder
+            _run_shared_sync_and_refresh()
+
+    if st.session_state.get("shared_sync_load_error"):
+        st.warning(
+            "Kunde inte läsa shared_sync_config.json vid uppstart: "
+            f"{st.session_state['shared_sync_load_error']}"
+        )
+    if st.session_state.get("shared_sync_save_error"):
+        st.warning(f"Kunde inte spara shared_sync_config.json: {st.session_state['shared_sync_save_error']}")
+    shared_sync_status_message = str(st.session_state.get("shared_sync_status_message") or "").strip()
+    shared_sync_status_level = str(st.session_state.get("shared_sync_status_level") or "").strip()
+    if shared_sync_status_message:
+        if shared_sync_status_level == "disabled":
+            st.info(shared_sync_status_message)
+        elif shared_sync_status_level in ("warning", "error"):
+            st.warning(shared_sync_status_message)
 
 
 def _render_settings_page(
@@ -26,6 +130,7 @@ def _render_settings_page(
     st.header(MENU_SETTINGS)
     brand_index_path = _brand_index_path()
     ui_settings_path = _ui_settings_path()
+    _render_shared_sync_settings()
 
     current_hicore = _get_stored_file(st.session_state, kind="hicore")
     existing_excluded = [name for name in st.session_state["excluded_brands"] if name in brand_options]

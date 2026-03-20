@@ -17,6 +17,11 @@ PERSISTENT_FILE_NAMES = (
     "ui_settings.json",
     "supplier_transform_profiles.json",
 )
+SHARED_SYNC_FILE_NAMES = (
+    "supplier_index.txt",
+    "brand_index.txt",
+    "supplier_transform_profiles.json",
+)
 
 
 def _default_data_dir(
@@ -77,6 +82,18 @@ def supplier_transform_profiles_path() -> Path:
     """Return the persisted supplier transform profile file path."""
 
     return app_data_dir() / "supplier_transform_profiles.json"
+
+
+def shared_sync_config_path() -> Path:
+    """Return the local config path for the optional shared sync folder."""
+
+    return app_data_dir() / "shared_sync_config.json"
+
+
+def shared_sync_base_dir() -> Path:
+    """Return the local directory used to track the last synced shared payloads."""
+
+    return app_data_dir() / "shared_sync_base"
 
 
 def _resource_root(*, project_root: Path = PROJECT_ROOT) -> Path:

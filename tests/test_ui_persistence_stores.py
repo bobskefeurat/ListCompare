@@ -7,6 +7,7 @@ from listcompare.interfaces.ui.persistence import (
     index_store,
     profile_store,
     settings_store,
+    shared_sync_store,
 )
 
 
@@ -89,6 +90,19 @@ class UiPersistenceStoreTests(unittest.TestCase):
             profiles["EM Nordic"]["target_to_source"][SUPPLIER_HICORE_SKU_COLUMN],
             "SupplierSku",
         )
+
+    def test_shared_sync_store_roundtrip(self) -> None:
+        path = _InMemoryPath()
+        save_err = shared_sync_store.save_shared_sync_config(
+            path,
+            shared_folder=r"G:\Min enhet\ListCompareShared",
+        )
+        self.assertIsNone(save_err)
+
+        config, load_err = shared_sync_store.load_shared_sync_config(path)
+
+        self.assertIsNone(load_err)
+        self.assertEqual(config["shared_folder"], r"G:\Min enhet\ListCompareShared")
 
 
 if __name__ == "__main__":

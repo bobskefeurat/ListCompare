@@ -11,12 +11,63 @@ from ..common import (
 )
 from ..features.supplier_compare.page import _render_supplier_compare_tab
 from ..features.supplier_profiles.page import _render_supplier_transform_tab
+from ..io.index_names import _load_suppliers_from_index
+from ..persistence import profile_store as _profile_store
+from ..runtime_paths import (
+    supplier_index_path as _supplier_index_path,
+    supplier_transform_profiles_path as _supplier_transform_profiles_path,
+)
+from ..services.shared_sync import (
+    PROFILES_FILE_NAME as _PROFILES_FILE_NAME,
+    SUPPLIER_INDEX_FILE_NAME as _SUPPLIER_INDEX_FILE_NAME,
+    sync_shared_files as _sync_shared_files,
+)
 from ..session.supplier_page_state import (
     apply_requested_supplier_page_state as _apply_requested_supplier_page_state,
 )
 from ..session.supplier_selection import (
     sync_supplier_selection_session_state as _sync_supplier_selection_session_state,
 )
+
+
+def _sync_supplier_profiles_on_view_entry(
+    session_state: dict[str, object],
+    *,
+    selected_view: str,
+    supplier_options: list[str],
+    supplier_index_error: Optional[str],
+) -> tuple[list[str], Optional[str], Optional[str]]:
+    previous_rendered_view = session_state.get("supplier_page_view_last_rendered")
+    if (
+        selected_view != SUPPLIER_PAGE_VIEW_TRANSFORM
+        or previous_rendered_view == SUPPLIER_PAGE_VIEW_TRANSFORM
+    ):
+        return supplier_options, supplier_index_error, None
+
+    sync_status = _sync_shared_files(
+        targets=(_SUPPLIER_INDEX_FILE_NAME, _PROFILES_FILE_NAME)
+    )
+    session_state["shared_sync_status_level"] = sync_status.level
+    session_state["shared_sync_status_message"] = sync_status.message
+    session_state["shared_sync_profile_conflicts"] = sync_status.profile_conflicts
+
+    supplier_profiles, supplier_profiles_error = _profile_store.load_profiles(
+        _supplier_transform_profiles_path()
+    )
+    session_state["supplier_transform_profiles"] = dict(supplier_profiles)
+    session_state["supplier_transform_profiles_load_error"] = supplier_profiles_error
+
+    refreshed_supplier_options, refreshed_supplier_index_error = _load_suppliers_from_index(
+        _supplier_index_path()
+    )
+    if refreshed_supplier_index_error is None:
+        supplier_options = refreshed_supplier_options
+        supplier_index_error = None
+
+    warning_message = None
+    if sync_status.level in ("warning", "error"):
+        warning_message = sync_status.message
+    return supplier_options, supplier_index_error, warning_message
 
 
 def _render_supplier_page(
@@ -31,11 +82,6 @@ def _render_supplier_page(
     _apply_requested_supplier_page_state(
         st.session_state,
         supplier_options=supplier_options,
-    )
-
-    _sync_supplier_selection_session_state(
-        st.session_state,
-        supplier_options,
     )
 
     attention_required = bool(st.session_state.get("supplier_transform_attention_required", False))
@@ -64,6 +110,18 @@ section.main div[data-testid="stRadio"] div[role="radiogroup"][aria-orientation=
         key="supplier_page_view",
         horizontal=True,
     )
+    supplier_options, supplier_index_error, sync_warning_message = _sync_supplier_profiles_on_view_entry(
+        st.session_state,
+        selected_view=selected_view,
+        supplier_options=supplier_options,
+        supplier_index_error=supplier_index_error,
+    )
+    _sync_supplier_selection_session_state(
+        st.session_state,
+        supplier_options,
+    )
+    if sync_warning_message:
+        st.warning(sync_warning_message)
     if selected_view == SUPPLIER_PAGE_VIEW_COMPARE:
         _render_supplier_compare_tab(
             supplier_options=supplier_options,

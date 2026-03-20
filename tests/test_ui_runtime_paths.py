@@ -1,6 +1,7 @@
+import shutil
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from uuid import uuid4
 
 from listcompare.interfaces.ui import runtime_paths
 
@@ -31,12 +32,12 @@ class UiRuntimePathsTests(unittest.TestCase):
         self.assertEqual(data_dir, Path("tests/runtime-data").resolve())
 
     def test_initialize_runtime_storage_copies_missing_seed_files(self) -> None:
-        with TemporaryDirectory(dir=Path("tests").resolve()) as temp_dir:
-            temp_root = Path(temp_dir)
+        temp_root = Path("tests") / "_tmp_runtime_paths" / uuid4().hex
+        try:
             source_root = temp_root / "seed"
             data_dir = temp_root / "data"
-            source_root.mkdir()
-            data_dir.mkdir()
+            source_root.mkdir(parents=True, exist_ok=True)
+            data_dir.mkdir(parents=True, exist_ok=True)
 
             supplier_index_path = source_root / "supplier_index.txt"
             supplier_index_path.write_text("Acme\n", encoding="utf-8-sig")
@@ -62,6 +63,9 @@ class UiRuntimePathsTests(unittest.TestCase):
                 '{"excluded_brands":["Existing"]}\n',
             )
             self.assertFalse((data_dir / "brand_index.txt").exists())
+        finally:
+            if temp_root.exists():
+                shutil.rmtree(temp_root, ignore_errors=True)
 
 
 if __name__ == "__main__":
