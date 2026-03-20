@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 import streamlit as st
+from openpyxl import load_workbook
 
 from ..common import CSV_ENCODINGS
 
@@ -77,6 +79,60 @@ def _read_compare_magento_csv_upload(data: bytes) -> pd.DataFrame:
     return _read_supplier_csv_upload(data)
 
 
+def _zero_pad_width_from_excel_number_format(number_format: object) -> Optional[int]:
+    text = str(number_format or "").strip()
+    if text == "":
+        return None
+
+    primary_section = text.split(";", 1)[0]
+    primary_section = re.sub(r'"[^"]*"', "", primary_section)
+    primary_section = re.sub(r"\[[^\]]*\]", "", primary_section)
+    primary_section = re.sub(r"\\.", "", primary_section)
+    primary_section = primary_section.strip()
+    if re.fullmatch(r"0+", primary_section) is None:
+        return None
+    return len(primary_section)
+
+
+def _formatted_zero_padded_excel_text(raw_value: object, number_format: object) -> Optional[str]:
+    width = _zero_pad_width_from_excel_number_format(number_format)
+    if width is None or isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, int):
+        integer_value = raw_value
+    elif isinstance(raw_value, float):
+        if not raw_value.is_integer():
+            return None
+        integer_value = int(raw_value)
+    else:
+        return None
+
+    sign = "-" if integer_value < 0 else ""
+    digits = str(abs(integer_value)).zfill(width)
+    return f"{sign}{digits}"
+
+
+def _read_excel_upload(data: bytes) -> pd.DataFrame:
+    df = pd.read_excel(io.BytesIO(data), dtype=str)
+    workbook = load_workbook(io.BytesIO(data), data_only=True)
+    try:
+        worksheet = workbook[workbook.sheetnames[0]]
+        repaired_df = df.copy()
+        for row_index in range(len(repaired_df.index)):
+            for column_index in range(len(repaired_df.columns)):
+                cell = worksheet.cell(row=row_index + 2, column=column_index + 1)
+                repaired_value = _formatted_zero_padded_excel_text(
+                    cell.value,
+                    cell.number_format,
+                )
+                if repaired_value is None:
+                    continue
+                repaired_df.iat[row_index, column_index] = repaired_value
+        return repaired_df
+    finally:
+        workbook.close()
+
+
 def _read_supplier_upload(file_name: str, data: bytes) -> pd.DataFrame:
     return _read_supplier_upload_cached(file_name=file_name, data=data).copy()
 
@@ -87,6 +143,5 @@ def _read_supplier_upload_cached(file_name: str, data: bytes) -> pd.DataFrame:
     if suffix == ".csv":
         return _read_supplier_csv_upload(data)
     if suffix in (".xlsx", ".xls", ".xlsm"):
-        return pd.read_excel(io.BytesIO(data), dtype=str)
+        return _read_excel_upload(data)
     raise ValueError(f"Unsupported supplier file type: {file_name}")
-
