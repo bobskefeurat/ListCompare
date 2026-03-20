@@ -63,6 +63,32 @@ The root file `app.py` is an entrypoint that forwards to `listcompare/interfaces
 - Optional: pass `-InstallBuildDeps` and/or `-PythonExe <full path to python.exe>` to `build_exe.ps1`
 - Optional: set `LISTCOMPARE_OPEN_BROWSER=0` before launch if you want the packaged app to stay headless
 
+## Shared Release Launcher
+
+- `ListCompare.cmd` starts `ListCompare Updater.ps1`, which checks for a newer packaged app release before launching the local runtime copy
+- The launcher looks for a shared Drive release folder named `ListCompareShared\releases`
+- A valid release folder must contain:
+  - `latest.json`
+  - one or more release archives such as `ListCompare-windows-1.0.5.zip`
+- `latest.json` format:
+
+```json
+{
+  "version": "1.0.5",
+  "zip": "ListCompare-windows-1.0.5.zip"
+}
+```
+
+- The launcher installs updates into `%LOCALAPPDATA%\ListCompareRuntime\current`
+- Local installed-version metadata is stored in `%LOCALAPPDATA%\ListCompareRuntime\installed.json`
+- If the shared release folder is unavailable, the launcher falls back to the most recently installed local version
+- When publishing a new release, copy the new zip archive into `releases` first and update `latest.json` last
+- `Publish-SharedRelease.ps1 -Version 1.0.5` copies `dist\ListCompare-windows.zip` into the shared `releases` folder as `ListCompare-windows-1.0.5.zip` and updates `latest.json`
+- Optional: pass `-ReleaseRoot <path>` to publish to a specific shared release folder
+- Optional: pass `-ZipPath <path>` to publish from a different built archive
+- Optional: override release discovery for testing with `LISTCOMPARE_RELEASE_DIR`
+- Optional: override the local runtime directory for testing with `LISTCOMPARE_RUNTIME_DIR`
+
 ## API Docs
 
 - Install build dependencies: `python -m pip install -r requirements.txt -r requirements-build.txt`
