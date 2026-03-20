@@ -2,6 +2,7 @@ import io
 import unittest
 
 import pandas as pd
+from openpyxl import load_workbook
 
 from listcompare.core.products.product_schema import HICORE_COLUMNS
 from listcompare.core.suppliers.prepare import (
@@ -24,6 +25,10 @@ def _to_csv_bytes(df: pd.DataFrame) -> bytes:
 
 def _read_excel_bytes(data: bytes) -> pd.DataFrame:
     return pd.read_excel(io.BytesIO(data), dtype=str).fillna("")
+
+
+def _load_excel_workbook(data: bytes):
+    return load_workbook(io.BytesIO(data), data_only=False)
 
 
 def _purchase_column_name() -> str:
@@ -298,6 +303,153 @@ class SupplierUiExportTests(unittest.TestCase):
         self.assertEqual(review_export[sku_col].tolist(), ["NEW-1"])
         self.assertEqual(review_export[article_number_col].tolist(), ["ART-9"])
         self.assertEqual(review_export[name_col].tolist(), ["SKU new"])
+
+    def test_supplier_exports_force_text_format_for_identifier_columns(self) -> None:
+        sku_col = HICORE_COLUMNS["sku"]
+        article_number_col = HICORE_COLUMNS["article_number"]
+        name_col = HICORE_COLUMNS["name"]
+        supplier_col = HICORE_COLUMNS["supplier"]
+        total_col = HICORE_COLUMNS["total_stock"]
+        reserved_col = HICORE_COLUMNS["reserved"]
+        price_col = HICORE_COLUMNS["price"]
+
+        df_hicore = pd.DataFrame(
+            [
+                {
+                    sku_col: "00100",
+                    article_number_col: "0009",
+                    name_col: "SKU old",
+                    total_col: "1",
+                    reserved_col: "0",
+                    price_col: "10",
+                    supplier_col: "EM Nordic",
+                },
+            ]
+        )
+        hicore_bytes = _to_csv_bytes(df_hicore)
+
+        supplier_columns = [*SUPPLIER_HICORE_RENAME_COLUMNS, SUPPLIER_HICORE_SUPPLIER_COLUMN]
+        base_row = {column: "" for column in supplier_columns}
+        df_supplier = pd.DataFrame(
+            [
+                {
+                    **base_row,
+                    sku_col: "100",
+                    article_number_col: "0009",
+                    name_col: "SKU supplier",
+                    price_col: "11",
+                    SUPPLIER_HICORE_SUPPLIER_COLUMN: "EM Nordic",
+                },
+            ]
+        )
+
+        result = compute_supplier_result(
+            hicore_bytes=hicore_bytes,
+            supplier_name="EM Nordic",
+            supplier_df=df_supplier,
+        )
+
+        price_workbook = _load_excel_workbook(result.price_updates_in_stock_excel_bytes)
+        price_sheet = price_workbook.active
+        self.assertEqual(price_sheet["A1"].value, sku_col)
+        self.assertEqual(price_sheet["A2"].value, "00100")
+        self.assertEqual(price_sheet["A2"].number_format, "@")
+
+        review_hicore = pd.DataFrame(
+            [
+                {
+                    sku_col: "OLD-1",
+                    article_number_col: "0009",
+                    name_col: "SKU old",
+                    total_col: "1",
+                    reserved_col: "0",
+                    price_col: "10",
+                    supplier_col: "EM Nordic",
+                },
+            ]
+        )
+        review_hicore_bytes = _to_csv_bytes(review_hicore)
+        review_supplier = pd.DataFrame(
+            [
+                {
+                    **base_row,
+                    sku_col: "NEW-1",
+                    article_number_col: "0009",
+                    name_col: "SKU new",
+                    price_col: "10",
+                    SUPPLIER_HICORE_SUPPLIER_COLUMN: "EM Nordic",
+                },
+            ]
+        )
+        review_result = compute_supplier_result(
+            hicore_bytes=review_hicore_bytes,
+            supplier_name="EM Nordic",
+            supplier_df=review_supplier,
+        )
+
+        review_workbook = _load_excel_workbook(review_result.article_number_review_excel_bytes)
+        review_sheet = review_workbook.active
+        self.assertEqual(review_sheet["A1"].value, sku_col)
+        self.assertEqual(review_sheet["A2"].value, "NEW-1")
+        self.assertEqual(review_sheet["A2"].number_format, "@")
+        self.assertEqual(review_sheet["B1"].value, article_number_col)
+        self.assertEqual(review_sheet["B2"].value, "0009")
+        self.assertEqual(review_sheet["B2"].number_format, "@")
+
+    def test_supplier_price_exports_write_decimal_columns_as_numeric_cells(self) -> None:
+        sku_col = HICORE_COLUMNS["sku"]
+        name_col = HICORE_COLUMNS["name"]
+        brand_col = HICORE_COLUMNS["brand"]
+        supplier_col = HICORE_COLUMNS["supplier"]
+        total_col = HICORE_COLUMNS["total_stock"]
+        reserved_col = HICORE_COLUMNS["reserved"]
+        price_col = HICORE_COLUMNS["price"]
+        purchase_col = _purchase_column_name()
+
+        df_hicore = pd.DataFrame(
+            [
+                {
+                    sku_col: "00100",
+                    name_col: "SKU 100",
+                    total_col: "3",
+                    reserved_col: "0",
+                    price_col: "10",
+                    supplier_col: "EM Nordic",
+                },
+            ]
+        )
+        hicore_bytes = _to_csv_bytes(df_hicore)
+
+        supplier_columns = [*SUPPLIER_HICORE_RENAME_COLUMNS, SUPPLIER_HICORE_SUPPLIER_COLUMN]
+        base_row = {column: "" for column in supplier_columns}
+        df_supplier = pd.DataFrame(
+            [
+                {
+                    **base_row,
+                    sku_col: "100",
+                    name_col: "SKU 100 supplier",
+                    brand_col: "Brand 100",
+                    purchase_col: "12,50 SEK",
+                    price_col: "99.95",
+                    SUPPLIER_HICORE_SUPPLIER_COLUMN: "EM Nordic",
+                },
+            ]
+        )
+
+        result = compute_supplier_result(
+            hicore_bytes=hicore_bytes,
+            supplier_name="EM Nordic",
+            supplier_df=df_supplier,
+        )
+
+        workbook = _load_excel_workbook(result.price_updates_in_stock_excel_bytes)
+        sheet = workbook.active
+        self.assertEqual(sheet["B1"].value, purchase_col)
+        self.assertEqual(sheet["B2"].data_type, "n")
+        self.assertEqual(sheet["B2"].value, 12.5)
+        self.assertEqual(sheet["C1"].value, price_col)
+        self.assertEqual(sheet["C2"].data_type, "n")
+        self.assertEqual(sheet["C2"].value, 99.95)
 
     def test_supplier_compare_does_not_mark_profile_excluded_brand_as_outgoing(self) -> None:
         sku_col = HICORE_COLUMNS["sku"]
