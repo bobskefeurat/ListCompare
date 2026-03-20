@@ -1,6 +1,6 @@
 import unittest
 
-from listcompare.core.comparison.use_cases import (
+from listcompare.core.comparison import (
     build_comparison_results,
     build_supplier_comparison_results,
     filter_product_map_by_excluded_normalized_skus,

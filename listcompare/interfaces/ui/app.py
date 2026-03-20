@@ -18,6 +18,7 @@ from .runtime_paths import (
 )
 from .session.bootstrap import init_session_state as _init_session_state
 from .session.file_inputs import get_stored_file as _get_stored_file
+from .session.shared_sync_status import store_shared_sync_status as _store_shared_sync_status
 from .services.index_sync import (
     sync_index_options_from_uploaded_hicore as _sync_index_options_from_uploaded_hicore,
 )
@@ -29,9 +30,13 @@ def main() -> None:
     _ensure_runtime_storage_initialized()
     shared_sync_status = _sync_shared_files()
     _init_session_state(st.session_state)
-    st.session_state["shared_sync_status_level"] = shared_sync_status.level
-    st.session_state["shared_sync_status_message"] = shared_sync_status.message
-    st.session_state["shared_sync_profile_conflicts"] = shared_sync_status.profile_conflicts
+    _store_shared_sync_status(
+        st.session_state,
+        level=shared_sync_status.level,
+        message=shared_sync_status.message,
+        profile_conflicts=shared_sync_status.profile_conflicts,
+        source="Appstart",
+    )
 
     st.title("ListCompare")
     st.sidebar.title("Meny")

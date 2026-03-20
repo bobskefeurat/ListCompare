@@ -189,6 +189,39 @@ class CompareUiComputeTests(unittest.TestCase):
         self.assertEqual(export_df.columns.tolist(), [sku_col])
         self.assertEqual(export_df[sku_col].tolist(), ["001"])
 
+    def test_compare_result_uses_direct_hicore_stock_when_computed_columns_are_missing(self) -> None:
+        sku_col = HICORE_COLUMNS["sku"]
+        name_col = HICORE_COLUMNS["name"]
+        stock_col = HICORE_COLUMNS["stock"]
+        show_on_web_col = HICORE_COLUMNS["show_on_web"]
+
+        df_hicore = pd.DataFrame(
+            [
+                {
+                    sku_col: "001",
+                    name_col: "Product A",
+                    stock_col: "3",
+                    show_on_web_col: "True",
+                }
+            ]
+        )
+        df_magento = pd.DataFrame(columns=["sku", "name", "qty"])
+
+        result = compute_compare_result(
+            hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
+            magento_bytes=_to_csv_bytes(df_magento, sep=","),
+        )
+
+        self.assertEqual(result.only_in_hicore_web_visible_in_stock_count, 1)
+        self.assertEqual(
+            result.only_in_hicore_web_visible_in_stock_df["sku"].tolist(),
+            ["001"],
+        )
+        self.assertEqual(
+            result.only_in_hicore_web_visible_in_stock_df["stock"].tolist(),
+            ["3"],
+        )
+
     def test_compare_web_order_result_warns_when_order_columns_are_missing(self) -> None:
         df_hicore = pd.DataFrame([{"Ordernr": "10"}])
         df_magento = pd.DataFrame([{"Other": "20"}])

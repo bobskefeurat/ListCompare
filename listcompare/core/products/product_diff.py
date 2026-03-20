@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .product_schema import Product
 
@@ -14,10 +14,19 @@ def normalize_sku(sku: str) -> str:
     return s2 if s2 != "" else "0"
 
 
+def normalize_comparable_sku(sku: str) -> Optional[str]:
+    normalized = normalize_sku(sku)
+    if normalized == "":
+        return None
+    return normalized
+
+
 def build_normalized_map(product_map: ProductMap) -> Dict[str, List[Product]]:
     out: Dict[str, List[Product]] = {}
     for sku, rows in product_map.items():
-        key = normalize_sku(sku)
+        key = normalize_comparable_sku(sku)
+        if key is None:
+            continue
         out.setdefault(key, []).extend(rows)
     return out
 
@@ -51,12 +60,18 @@ def find_missing_products_by_sku(
 
     only_in_right: ProductMap = {}
     for right_sku, right_rows in right_map.items():
-        if normalize_sku(right_sku) not in left_norm:
+        normalized_right_sku = normalize_comparable_sku(right_sku)
+        if normalized_right_sku is None:
+            continue
+        if normalized_right_sku not in left_norm:
             only_in_right[right_sku] = right_rows
 
     only_in_left: ProductMap = {}
     for left_sku, left_rows in left_map.items():
-        if normalize_sku(left_sku) not in right_norm:
+        normalized_left_sku = normalize_comparable_sku(left_sku)
+        if normalized_left_sku is None:
+            continue
+        if normalized_left_sku not in right_norm:
             only_in_left[left_sku] = left_rows
 
     return only_in_left, only_in_right

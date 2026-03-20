@@ -15,6 +15,7 @@ $releaseDirEnvVar = "LISTCOMPARE_RELEASE_DIR"
 $runtimeDirEnvVar = "LISTCOMPARE_RUNTIME_DIR"
 $sharedSyncConfigName = "shared_sync_config.json"
 $sharedFolderName = "ListCompareShared"
+$script:ReleaseRootResolutionWarning = ""
 
 function Test-PathSafe {
     param(
@@ -132,7 +133,13 @@ function Get-ConfiguredSharedReleaseRoot {
         return ""
     }
 
-    $rawConfig = Get-Content $configPath -Raw | ConvertFrom-Json
+    try {
+        $rawConfig = Get-Content $configPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        $script:ReleaseRootResolutionWarning = "Could not read shared release config: $($_.Exception.Message)"
+        return ""
+    }
     $sharedFolder = [string]$rawConfig.shared_folder
     if ($sharedFolder -eq "") {
         return ""
@@ -146,7 +153,10 @@ function Get-ConfiguredSharedReleaseRoot {
 }
 
 function Resolve-ReleaseRootPath {
-    param([string]$RequestedReleaseRoot)
+    param(
+        [string]$RequestedReleaseRoot,
+        [switch]$AllowInstalledFallback
+    )
 
     $resolvedRequested = Resolve-RequestedDirectory -PathText $RequestedReleaseRoot -Label "Release directory"
     if ($resolvedRequested -ne "") {
@@ -170,6 +180,10 @@ function Resolve-ReleaseRootPath {
         return $candidateRoots[0]
     }
     if ($candidateRoots.Count -gt 1) {
+        if ($AllowInstalledFallback) {
+            $script:ReleaseRootResolutionWarning = "Multiple release folders were found. Set $releaseDirEnvVar or pass -ReleaseRoot."
+            return ""
+        }
         throw "Multiple release folders were found. Set $releaseDirEnvVar or pass -ReleaseRoot."
     }
     return ""
@@ -309,14 +323,25 @@ function Install-Release {
     }
 }
 
-try {
-    $resolvedReleaseRoot = Resolve-ReleaseRootPath -RequestedReleaseRoot $ReleaseRoot
+function Invoke-ListCompareUpdater {
     $resolvedRuntimeRoot = Resolve-RuntimeRootPath -RequestedRuntimeRoot $RuntimeRoot
     New-Item -ItemType Directory -Path $resolvedRuntimeRoot -Force | Out-Null
 
     $installedStatePath = Join-Path $resolvedRuntimeRoot $installedStateName
     $currentRoot = Join-Path $resolvedRuntimeRoot "current"
     $currentExePath = Join-Path $currentRoot $appExeName
+    $hasRunnableLocalVersion = Test-PathSafe $currentExePath -Leaf
+
+    $script:ReleaseRootResolutionWarning = ""
+    $resolvedReleaseRoot = Resolve-ReleaseRootPath `
+        -RequestedReleaseRoot $ReleaseRoot `
+        -AllowInstalledFallback:$hasRunnableLocalVersion
+    if ($resolvedReleaseRoot -eq "" -and $script:ReleaseRootResolutionWarning -ne "") {
+        if (-not $hasRunnableLocalVersion) {
+            throw $script:ReleaseRootResolutionWarning
+        }
+        Write-Warning $script:ReleaseRootResolutionWarning
+    }
 
     $latestRelease = Load-LatestRelease -ResolvedReleaseRoot $resolvedReleaseRoot
     $installedState = Load-InstalledState -InstalledStatePath $installedStatePath
@@ -347,6 +372,14 @@ try {
     if (-not $SkipLaunch) {
         Start-Process -FilePath $currentExePath | Out-Null
     }
+}
+
+if ([string][Environment]::GetEnvironmentVariable("LISTCOMPARE_UPDATER_SKIP_MAIN") -eq "1") {
+    return
+}
+
+try {
+    Invoke-ListCompareUpdater
 }
 catch {
     Show-LauncherError $_.Exception.Message

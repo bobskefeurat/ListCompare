@@ -11,6 +11,7 @@ from pathlib import Path
 APP_NAME = "ListCompare"
 DATA_DIR_ENV_VAR = "LISTCOMPARE_DATA_DIR"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+RUNTIME_SEED_DIR_NAME = "runtime_seed"
 PERSISTENT_FILE_NAMES = (
     "supplier_index.txt",
     "brand_index.txt",
@@ -102,13 +103,17 @@ def _resource_root(*, project_root: Path = PROJECT_ROOT) -> Path:
     return project_root
 
 
+def _seed_root(*, root: Path) -> Path:
+    return root / RUNTIME_SEED_DIR_NAME
+
+
 def _seed_source_roots(*, data_dir: Path, project_root: Path = PROJECT_ROOT) -> list[Path]:
     resolved_data_dir = data_dir.resolve()
     roots: list[Path] = []
     seen: set[str] = set()
 
     for candidate in (project_root, _resource_root(project_root=project_root)):
-        resolved_candidate = candidate.resolve()
+        resolved_candidate = _seed_root(root=candidate).resolve()
         candidate_key = str(resolved_candidate).casefold()
         if resolved_candidate == resolved_data_dir or candidate_key in seen:
             continue

@@ -4,7 +4,12 @@ from collections import defaultdict
 
 import pandas as pd
 
-from .product_normalization import compute_hicore_stock, normalise_price, normalise_stock, to_str
+from .product_normalization import (
+    compute_hicore_stock_with_fallback,
+    normalise_price,
+    normalise_stock,
+    to_str,
+)
 from .product_schema import HICORE_COLUMNS, MAGENTO_COLUMNS, Product
 from .repair_magento_export import repair_shifted_magento_rows
 
@@ -38,12 +43,10 @@ def build_product_map(
     reserved_values = _column_values(df, reserved_col)
     price_values = _column_values(df, price_col)
     supplier_values = _column_values(df, supplier_col)
-    use_hicore_stock_columns = source == "hicore" and (total_col or reserved_col)
-
     to_str_value = to_str
     normalize_price_value = normalise_price
     normalize_stock_value = normalise_stock
-    compute_hicore_stock_value = compute_hicore_stock
+    compute_hicore_stock_with_fallback_value = compute_hicore_stock_with_fallback
 
     products: dict[str, list[Product]] = defaultdict(list)
     for sku_raw, article_number_raw, name_raw, stock_raw, total_raw, reserved_raw, price_raw, supplier_raw in zip(
@@ -62,8 +65,8 @@ def build_product_map(
         supplier = to_str_value(supplier_raw) if supplier_col else ""
         price = normalize_price_value(price_raw) if price_col else ""
 
-        if use_hicore_stock_columns:
-            stock = compute_hicore_stock_value(total_raw, reserved_raw)
+        if source == "hicore":
+            stock = compute_hicore_stock_with_fallback_value(total_raw, reserved_raw, stock_raw)
         else:
             stock = normalize_stock_value(stock_raw)
 

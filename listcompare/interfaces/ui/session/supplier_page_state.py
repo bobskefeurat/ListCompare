@@ -6,7 +6,7 @@ from ..common import (
     SUPPLIER_PROFILE_MODE_EDITOR,
     SUPPLIER_PROFILE_MODE_OVERVIEW,
 )
-from .supplier_selection import normalize_selected_supplier_for_options
+from .supplier_selection import normalize_selected_supplier_for_options, set_selected_supplier
 
 
 def apply_requested_supplier_page_state(
@@ -31,9 +31,11 @@ def apply_requested_supplier_page_state(
         supplier_options,
     )
     if requested_profile_supplier is not None:
-        session_state["supplier_profiles_active_supplier"] = requested_profile_supplier
-        session_state["supplier_internal_name"] = requested_profile_supplier
-        session_state["supplier_transform_internal_name"] = requested_profile_supplier
+        set_selected_supplier(
+            session_state,
+            requested_profile_supplier,
+            supplier_options,
+        )
     session_state["supplier_profiles_supplier_request"] = None
 
     if session_state.get("supplier_page_view") not in valid_views:

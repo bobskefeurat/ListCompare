@@ -57,13 +57,20 @@ function Resolve-SharedReleaseRoot {
     if ($baseLocalAppData -ne "") {
         $configPath = Join-Path $baseLocalAppData "ListCompare\$sharedSyncConfigName"
         if (Test-Path $configPath -PathType Leaf) {
-            $rawConfig = Get-Content $configPath -Raw | ConvertFrom-Json
-            $sharedFolder = [string]$rawConfig.shared_folder
-            if ($sharedFolder -ne "") {
-                $candidate = Join-Path $sharedFolder "releases"
-                if (Test-Path $candidate -PathType Container) {
-                    return (Resolve-Path $candidate).Path
+            try {
+                $rawConfig = Get-Content $configPath -Raw | ConvertFrom-Json
+                $sharedFolder = [string]$rawConfig.shared_folder
+                if ($sharedFolder -ne "") {
+                    $candidate = Join-Path $sharedFolder "releases"
+                    if (Test-Path $candidate -PathType Container) {
+                        return (Resolve-Path $candidate).Path
+                    }
                 }
+            }
+            catch {
+                # Ignore malformed local sync config here so explicit parameters,
+                # environment variables, or the final generic error remain the
+                # user-facing behavior.
             }
         }
     }

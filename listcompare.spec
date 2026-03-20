@@ -6,12 +6,16 @@ from PyInstaller.utils.hooks import collect_all
 
 
 PROJECT_ROOT = Path(SPECPATH).resolve()
-APP_DATA_FILES = [
-    ("app.py", "."),
-    ("brand_index.txt", "."),
-    ("supplier_index.txt", "."),
-    ("ui_settings.json", "."),
-    ("supplier_transform_profiles.json", "."),
+RUNTIME_SEED_DIR_NAME = "runtime_seed"
+RUNTIME_SEED_FILES = [
+    "brand_index.txt",
+    "supplier_index.txt",
+    "ui_settings.json",
+    "supplier_transform_profiles.json",
+]
+APP_DATA_FILES = [("app.py", ".")] + [
+    (str(Path(RUNTIME_SEED_DIR_NAME) / file_name), RUNTIME_SEED_DIR_NAME)
+    for file_name in RUNTIME_SEED_FILES
 ]
 
 

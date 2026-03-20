@@ -17,9 +17,11 @@ The project is organized into a clear package structure:
     - `pages/compare.py`: compare page rendering
     - `pages/supplier.py`: supplier page rendering
     - `pages/settings.py`: settings page rendering
-    - `services/compare_compute.py`: compare + web order orchestration
-    - `services/supplier_compute.py`: supplier compare orchestration
+    - `services/compare_pipeline.py`: compare parsing + domain orchestration
+    - `services/compare_compute.py`: compare/web order UI shaping + exports
     - `services/index_sync.py`: HiCore-driven supplier/brand index sync
+    - `services/supplier_pipeline.py`: supplier parsing + domain orchestration
+    - `services/supplier_compute.py`: supplier compare UI shaping + exports
     - `session/file_inputs.py`: file upload state + input rendering helpers
     - `session/bootstrap.py`: session default initialization
     - `session/navigation.py`: rerun/navigation helpers
@@ -40,6 +42,23 @@ The project is organized into a clear package structure:
 ## Installation
 
 - Install dependencies: `pip install -r requirements.txt`
+- `requirements.txt` and `requirements-build.txt` are pinned to the current known-good toolchain used by the audited Windows build/test environment; update them intentionally when refreshing the supported baseline
+
+## Refreshing Dependency Pins
+
+When updating pinned versions in `requirements.txt` or `requirements-build.txt`,
+use the same verification path that was used to establish the current baseline:
+
+1. Update the pinned versions intentionally instead of using broad specifiers.
+2. Install the refreshed runtime/build requirements into a clean environment.
+3. Rerun the Python baseline:
+   `python -m unittest discover -s tests -p "test_*.py"`
+4. Rerun the tracked-source syntax smoke:
+   `python compile_python_sources.py`
+5. If build-related dependencies changed, rerun:
+   `powershell -ExecutionPolicy Bypass -File .\build_api_docs.ps1`
+   `powershell -ExecutionPolicy Bypass -File .\build_exe.ps1`
+6. Only keep the new pins if the refreshed baseline stays green end-to-end.
 
 ## Running
 
@@ -51,6 +70,7 @@ The root file `app.py` is an entrypoint that forwards to `listcompare/interfaces
 
 - Persistent app data is stored in `%LOCALAPPDATA%\\ListCompare` on Windows.
 - Override the storage directory with `LISTCOMPARE_DATA_DIR` when testing packaging or isolated runs locally.
+- First-launch seed files are loaded from the tracked `runtime_seed/` directory so packaged builds do not inherit ignored local repo state.
 
 ## Windows Build
 
@@ -100,3 +120,4 @@ The root file `app.py` is an entrypoint that forwards to `listcompare/interfaces
 ## Tests
 
 - Run all tests: `python -m unittest discover -s tests -p "test_*.py"`
+- Run the tracked-source syntax smoke check: `python compile_python_sources.py`

@@ -53,6 +53,10 @@ class SupplierPageTests(unittest.TestCase):
         self.assertEqual(session_state["shared_sync_status_level"], "success")
         self.assertEqual(session_state["shared_sync_status_message"], "Synkad")
         self.assertEqual(
+            session_state["shared_sync_status_source"],
+            "Leverantörer: öppna Leverantörsprofiler",
+        )
+        self.assertEqual(
             session_state["supplier_transform_profiles"],
             {"EM Nordic": {"target_to_source": {}}},
         )

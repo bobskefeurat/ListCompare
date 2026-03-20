@@ -15,7 +15,9 @@ ENV/
 .ruff_cache/
 .coverage
 htmlcov/
-tests/tmp_test/
+tests/tmp*/
+tests/_tmp_*/
+.tmp_tests/
 build/
 dist/
 
@@ -33,3 +35,7 @@ supplier_transform_profiles.json
 # Local generated indexes
 brand_index.txt
 supplier_index.txt
+
+# Tracked runtime seed fixtures
+!runtime_seed/
+!runtime_seed/**

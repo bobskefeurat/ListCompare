@@ -13,6 +13,7 @@ from ..runtime_paths import (
 )
 from ..session.file_inputs import get_stored_file as _get_stored_file
 from ..session.run_state import clear_all_run_state as _clear_all_run_state
+from ..session.shared_sync_status import store_shared_sync_status as _store_shared_sync_status
 from ..session.settings_state import (
     persist_excluded_brands_setting as _persist_excluded_brands_setting,
 )
@@ -21,13 +22,6 @@ from ..services.shared_sync import (
     save_configured_shared_folder as _save_configured_shared_folder,
     sync_shared_files as _sync_shared_files,
 )
-
-
-def _apply_shared_sync_status(session_state: dict[str, object], *, level: str, message: str) -> None:
-    session_state["shared_sync_status_level"] = level
-    session_state["shared_sync_status_message"] = message
-
-
 def _reload_profiles_after_shared_sync() -> None:
     supplier_profiles, supplier_profiles_error = _profile_store.load_profiles(
         _supplier_transform_profiles_path()
@@ -36,14 +30,15 @@ def _reload_profiles_after_shared_sync() -> None:
     st.session_state["supplier_transform_profiles_load_error"] = supplier_profiles_error
 
 
-def _run_shared_sync_and_refresh() -> None:
+def _run_shared_sync_and_refresh(*, source: str) -> None:
     sync_status = _sync_shared_files()
-    _apply_shared_sync_status(
+    _store_shared_sync_status(
         st.session_state,
         level=sync_status.level,
         message=sync_status.message,
+        profile_conflicts=sync_status.profile_conflicts,
+        source=source,
     )
-    st.session_state["shared_sync_profile_conflicts"] = sync_status.profile_conflicts
     _reload_profiles_after_shared_sync()
     _clear_all_run_state(st.session_state)
     st.rerun()
@@ -69,6 +64,9 @@ def _render_shared_sync_settings() -> None:
     if len(shared_sync_candidates) == 1:
         shared_sync_folder = shared_sync_candidates[0]
         st.info(f"Drive-mapp hittad automatiskt: {shared_sync_folder}")
+        if configured_shared_folder != shared_sync_folder:
+            show_save_button = True
+            save_button_label = "Använd hittad mapp"
     elif shared_sync_candidates:
         current_candidate = configured_shared_folder
         if current_candidate in shared_sync_candidates:
@@ -95,14 +93,14 @@ def _render_shared_sync_settings() -> None:
 
     sync_col, action_col = st.columns(2)
     if sync_col.button("Synka nu", key="run_shared_sync_now"):
-        _run_shared_sync_and_refresh()
+        _run_shared_sync_and_refresh(source="Inställningar: synka nu")
     if show_save_button and action_col.button(save_button_label, key="save_shared_sync_folder"):
         save_error = _save_configured_shared_folder(shared_sync_folder)
         st.session_state["shared_sync_save_error"] = save_error
         if save_error is None:
             st.session_state["shared_sync_folder_widget"] = shared_sync_folder
             st.session_state["shared_sync_folder"] = shared_sync_folder
-            _run_shared_sync_and_refresh()
+            _run_shared_sync_and_refresh(source="Inställningar: spara synkmapp")
 
     if st.session_state.get("shared_sync_load_error"):
         st.warning(
@@ -113,11 +111,16 @@ def _render_shared_sync_settings() -> None:
         st.warning(f"Kunde inte spara shared_sync_config.json: {st.session_state['shared_sync_save_error']}")
     shared_sync_status_message = str(st.session_state.get("shared_sync_status_message") or "").strip()
     shared_sync_status_level = str(st.session_state.get("shared_sync_status_level") or "").strip()
+    shared_sync_status_source = str(st.session_state.get("shared_sync_status_source") or "").strip()
     if shared_sync_status_message:
+        if shared_sync_status_source:
+            st.caption(f"Senaste delade synk: {shared_sync_status_source}")
         if shared_sync_status_level == "disabled":
             st.info(shared_sync_status_message)
         elif shared_sync_status_level in ("warning", "error"):
             st.warning(shared_sync_status_message)
+        else:
+            st.success(shared_sync_status_message)
 
 
 def _render_settings_page(

@@ -38,15 +38,35 @@ class SharedSyncStatus:
     profile_conflicts: tuple[str, ...] = ()
 
 
+def _validate_shared_sync_folder(shared_folder: str) -> tuple[str, Optional[str]]:
+    normalized_folder = str(shared_folder).strip()
+    if normalized_folder == "":
+        return "", None
+
+    try:
+        resolved_folder = Path(normalized_folder).expanduser().resolve()
+    except Exception as exc:
+        return "", f"Kunde inte tolka delad synkmapp: {exc}"
+
+    if not resolved_folder.exists():
+        return "", f"Delad synkmapp finns inte: {resolved_folder}"
+    if not resolved_folder.is_dir():
+        return "", f"Delad synkmapp är inte en mapp: {resolved_folder}"
+    return str(resolved_folder), None
+
+
 def load_configured_shared_folder() -> tuple[str, Optional[str]]:
     config, error = _shared_sync_store.load_shared_sync_config(_shared_sync_config_path())
     return str(config.get("shared_folder", "")).strip(), error
 
 
 def save_configured_shared_folder(shared_folder: str) -> Optional[str]:
+    normalized_folder, validation_error = _validate_shared_sync_folder(shared_folder)
+    if validation_error:
+        return validation_error
     return _shared_sync_store.save_shared_sync_config(
         _shared_sync_config_path(),
-        shared_folder=shared_folder,
+        shared_folder=normalized_folder,
     )
 
 
@@ -58,8 +78,12 @@ def resolve_shared_sync_folder(
     configured_folder, config_error = load_configured_shared_folder()
     if config_error:
         return "", config_error, False
-    if configured_folder:
-        return configured_folder, None, False
+
+    normalized_configured_folder, validation_error = _validate_shared_sync_folder(configured_folder)
+    if validation_error:
+        return "", validation_error, False
+    if normalized_configured_folder:
+        return normalized_configured_folder, None, False
     if not auto_configure:
         return "", None, False
 
@@ -144,7 +168,6 @@ def sync_shared_files(
 
     try:
         shared_root = Path(shared_folder).expanduser()
-        shared_root.mkdir(parents=True, exist_ok=True)
         base_dir = _shared_sync_base_dir()
         base_dir.mkdir(parents=True, exist_ok=True)
     except Exception as exc:
@@ -252,6 +275,10 @@ def _save_profiles(path: Path, values: dict[str, dict[str, object]]) -> None:
         raise ValueError(error)
 
 
+def _should_write_synced_payload(*, path: Path, current_value: object, merged_value: object) -> bool:
+    return (not path.exists()) or current_value != merged_value
+
+
 def _sync_names_file(
     *,
     local_path: Path,
@@ -263,9 +290,26 @@ def _sync_names_file(
     local_values = load_names(local_path)
     shared_values = load_names(shared_path)
     merged_values, _new_names = _merge_supplier_lists(local_values, shared_values)
-    save_names(local_path, merged_values)
-    save_names(shared_path, merged_values)
-    save_names(base_path, merged_values)
+    base_values = load_names(base_path)
+
+    if _should_write_synced_payload(
+        path=local_path,
+        current_value=local_values,
+        merged_value=merged_values,
+    ):
+        save_names(local_path, merged_values)
+    if _should_write_synced_payload(
+        path=shared_path,
+        current_value=shared_values,
+        merged_value=merged_values,
+    ):
+        save_names(shared_path, merged_values)
+    if _should_write_synced_payload(
+        path=base_path,
+        current_value=base_values,
+        merged_value=merged_values,
+    ):
+        save_names(base_path, merged_values)
 
 
 def _sync_profiles_file(
@@ -286,9 +330,24 @@ def _sync_profiles_file(
     if conflicts:
         return conflicts
 
-    _save_profiles(local_path, merged_profiles)
-    _save_profiles(shared_path, merged_profiles)
-    _save_profiles(base_path, merged_profiles)
+    if _should_write_synced_payload(
+        path=local_path,
+        current_value=local_profiles,
+        merged_value=merged_profiles,
+    ):
+        _save_profiles(local_path, merged_profiles)
+    if _should_write_synced_payload(
+        path=shared_path,
+        current_value=shared_profiles,
+        merged_value=merged_profiles,
+    ):
+        _save_profiles(shared_path, merged_profiles)
+    if _should_write_synced_payload(
+        path=base_path,
+        current_value=base_profiles,
+        merged_value=merged_profiles,
+    ):
+        _save_profiles(base_path, merged_profiles)
     return ()
 
 

@@ -25,6 +25,7 @@ from ..services.shared_sync import (
 from ..session.supplier_page_state import (
     apply_requested_supplier_page_state as _apply_requested_supplier_page_state,
 )
+from ..session.shared_sync_status import store_shared_sync_status as _store_shared_sync_status
 from ..session.supplier_selection import (
     sync_supplier_selection_session_state as _sync_supplier_selection_session_state,
 )
@@ -47,9 +48,13 @@ def _sync_supplier_profiles_on_view_entry(
     sync_status = _sync_shared_files(
         targets=(_SUPPLIER_INDEX_FILE_NAME, _PROFILES_FILE_NAME)
     )
-    session_state["shared_sync_status_level"] = sync_status.level
-    session_state["shared_sync_status_message"] = sync_status.message
-    session_state["shared_sync_profile_conflicts"] = sync_status.profile_conflicts
+    _store_shared_sync_status(
+        session_state,
+        level=sync_status.level,
+        message=sync_status.message,
+        profile_conflicts=sync_status.profile_conflicts,
+        source="Leverantörer: öppna Leverantörsprofiler",
+    )
 
     supplier_profiles, supplier_profiles_error = _profile_store.load_profiles(
         _supplier_transform_profiles_path()

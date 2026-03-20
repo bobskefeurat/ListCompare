@@ -22,7 +22,7 @@ from ...session.profile_access import (
 from ...session.run_state import clear_supplier_state as _clear_supplier_state
 from ...session.supplier_selection import (
     normalize_selected_supplier_for_options as _normalize_selected_supplier_for_options,
-    sync_selected_supplier_between_views as _sync_selected_supplier_between_views,
+    set_selected_supplier as _set_selected_supplier,
 )
 from .prepare_state import _sync_supplier_prepare_state
 from .actions import (
@@ -49,12 +49,14 @@ def _render_supplier_compare_tab(
     excluded_brands: list[str],
 ) -> None:
     supplier_index_path = _supplier_index_path()
-    normalized_compare_supplier = _normalize_selected_supplier_for_options(
-        st.session_state.get("supplier_internal_name"),
+    _set_selected_supplier(
+        st.session_state,
+        _normalize_selected_supplier_for_options(
+            st.session_state.get("supplier_internal_name"),
+            supplier_options,
+        ),
         supplier_options,
     )
-    if st.session_state.get("supplier_internal_name") != normalized_compare_supplier:
-        st.session_state["supplier_internal_name"] = normalized_compare_supplier
 
     hicore_file = _render_file_input(
         session_state=st.session_state,
@@ -89,17 +91,10 @@ def _render_supplier_compare_tab(
     selected_supplier_name = (
         str(supplier_internal_name).strip() if supplier_internal_name is not None else ""
     )
-    if st.session_state.get("supplier_profiles_active_supplier") != (
-        selected_supplier_name if selected_supplier_name != "" else None
-    ):
-        st.session_state["supplier_profiles_active_supplier"] = (
-            selected_supplier_name if selected_supplier_name != "" else None
-        )
-    _sync_selected_supplier_between_views(
+    _set_selected_supplier(
         st.session_state,
         selected_supplier_name if selected_supplier_name != "" else None,
         supplier_options,
-        target_key="supplier_transform_internal_name",
     )
 
     profile_mapping, profile_composite_fields, profile_filters, profile_options = (

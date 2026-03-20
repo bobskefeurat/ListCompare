@@ -1,9 +1,8 @@
-import shutil
 import unittest
 from pathlib import Path
-from uuid import uuid4
 
 from listcompare.interfaces.ui import runtime_paths
+from tests._support import cleanup_temp_path, make_temp_dir
 
 
 class UiRuntimePathsTests(unittest.TestCase):
@@ -31,8 +30,33 @@ class UiRuntimePathsTests(unittest.TestCase):
 
         self.assertEqual(data_dir, Path("tests/runtime-data").resolve())
 
+    def test_seed_source_roots_use_runtime_seed_subdirectory(self) -> None:
+        temp_root = make_temp_dir("runtime-paths")
+        try:
+            project_root = temp_root / "project"
+            data_dir = temp_root / "data"
+
+            roots = runtime_paths._seed_source_roots(
+                data_dir=data_dir,
+                project_root=project_root,
+            )
+
+            self.assertEqual(
+                roots,
+                [(project_root / runtime_paths.RUNTIME_SEED_DIR_NAME).resolve()],
+            )
+        finally:
+            if temp_root.exists():
+                cleanup_temp_path(temp_root)
+
+    def test_repository_runtime_seed_contains_all_persistent_files(self) -> None:
+        seed_root = runtime_paths._seed_root(root=runtime_paths.PROJECT_ROOT)
+
+        for file_name in runtime_paths.PERSISTENT_FILE_NAMES:
+            self.assertTrue((seed_root / file_name).exists(), file_name)
+
     def test_initialize_runtime_storage_copies_missing_seed_files(self) -> None:
-        temp_root = Path("tests") / "_tmp_runtime_paths" / uuid4().hex
+        temp_root = make_temp_dir("runtime-paths")
         try:
             source_root = temp_root / "seed"
             data_dir = temp_root / "data"
@@ -65,7 +89,7 @@ class UiRuntimePathsTests(unittest.TestCase):
             self.assertFalse((data_dir / "brand_index.txt").exists())
         finally:
             if temp_root.exists():
-                shutil.rmtree(temp_root, ignore_errors=True)
+                cleanup_temp_path(temp_root)
 
 
 if __name__ == "__main__":

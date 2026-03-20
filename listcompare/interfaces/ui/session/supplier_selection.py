@@ -15,30 +15,29 @@ def normalize_selected_supplier_for_options(
     return selected if selected in supplier_options else None
 
 
-def sync_selected_supplier_between_views(
+def set_selected_supplier(
     session_state: dict[str, object],
     selected_supplier: Optional[str],
     supplier_options: list[str],
-    *,
-    target_key: str,
-) -> None:
+) -> Optional[str]:
     normalized = normalize_selected_supplier_for_options(selected_supplier, supplier_options)
-    if session_state.get(target_key) != normalized:
-        session_state[target_key] = normalized
-    session_state["_last_supplier_internal_name"] = normalized
+    if session_state.get("supplier_internal_name") != normalized:
+        session_state["supplier_internal_name"] = normalized
+    return normalized
 
 
 def sync_supplier_selection_session_state(
     session_state: dict[str, object],
     supplier_options: list[str],
 ) -> None:
-    normalized_compare_supplier = normalize_selected_supplier_for_options(
+    set_selected_supplier(
+        session_state,
         session_state.get("supplier_internal_name"),
         supplier_options,
     )
-    canonical_supplier = normalized_compare_supplier
-    if session_state.get("supplier_internal_name") != canonical_supplier:
-        session_state["supplier_internal_name"] = canonical_supplier
-    if session_state.get("supplier_transform_internal_name") != canonical_supplier:
-        session_state["supplier_transform_internal_name"] = canonical_supplier
-    session_state["_last_supplier_internal_name"] = canonical_supplier
+    normalized_last_supplier = normalize_selected_supplier_for_options(
+        session_state.get("_last_supplier_internal_name"),
+        supplier_options,
+    )
+    if session_state.get("_last_supplier_internal_name") != normalized_last_supplier:
+        session_state["_last_supplier_internal_name"] = normalized_last_supplier

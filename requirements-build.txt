@@ -1,2 +1,2 @@
-pyinstaller
-pdoc
+pyinstaller==6.19.0
+pdoc==16.0.0

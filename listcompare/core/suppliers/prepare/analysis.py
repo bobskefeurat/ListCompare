@@ -6,7 +6,7 @@ import pandas as pd
 
 from ...products.product_filters import normalized_skus_from_brand_filter
 from ...products.product_schema import HICORE_COLUMNS
-from ...products.product_diff import normalize_sku
+from ...products.product_diff import normalize_comparable_sku, normalize_sku
 from ..profile import (
     SUPPLIER_HICORE_RENAME_COLUMNS,
     SUPPLIER_HICORE_SKU_COLUMN,
@@ -57,6 +57,11 @@ def _canonicalize_prepared_output_df(df_supplier: pd.DataFrame) -> pd.DataFrame:
 
     canonical_df = prepared_df.loc[:, output_columns].copy()
     canonical_df[_SOURCE_ROW_COLUMN] = canonical_df.index.map(lambda raw_index: int(raw_index) + 2)
+    if SUPPLIER_HICORE_SKU_COLUMN in canonical_df.columns:
+        keep_rows = canonical_df[SUPPLIER_HICORE_SKU_COLUMN].map(
+            lambda raw_value: normalize_comparable_sku(_prepared_value_text(raw_value)) is not None
+        )
+        canonical_df = canonical_df.loc[keep_rows].copy()
     return canonical_df.reset_index(drop=True)
 
 
@@ -214,7 +219,11 @@ def build_supplier_prepare_analysis(
             column_name: _prepared_value_text(row.get(column_name, ""))
             for column_name in output_columns
         }
-        normalized_sku = normalize_sku(row_values.get(SUPPLIER_HICORE_SKU_COLUMN, ""))
+        normalized_sku = normalize_comparable_sku(
+            row_values.get(SUPPLIER_HICORE_SKU_COLUMN, "")
+        )
+        if normalized_sku is None:
+            continue
         source_row_number = int(row.get(_SOURCE_ROW_COLUMN, 0))
         grouped_rows.setdefault(normalized_sku, []).append((source_row_number, row_values))
 

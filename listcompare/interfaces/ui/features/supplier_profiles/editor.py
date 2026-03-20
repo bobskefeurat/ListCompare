@@ -28,7 +28,7 @@ from ...session.profile_state import (
 from ...session.run_state import clear_supplier_state as _clear_supplier_state
 from ...session.supplier_selection import (
     normalize_selected_supplier_for_options as _normalize_selected_supplier_for_options,
-    sync_selected_supplier_between_views as _sync_selected_supplier_between_views,
+    set_selected_supplier as _set_selected_supplier,
 )
 from ...shared.presentation import with_one_based_index as _with_one_based_index
 from .form import _render_profile_mapping_form
@@ -50,19 +50,14 @@ def _render_supplier_profile_editor(
 ) -> None:
     supplier_index_path = _supplier_index_path()
     supplier_profiles_path = _supplier_transform_profiles_path()
-    normalized_transform_supplier = _normalize_selected_supplier_for_options(
-        st.session_state.get("supplier_internal_name"),
+    _set_selected_supplier(
+        st.session_state,
+        _normalize_selected_supplier_for_options(
+            st.session_state.get("supplier_internal_name"),
+            supplier_options,
+        ),
         supplier_options,
     )
-    if normalized_transform_supplier is None:
-        normalized_transform_supplier = _normalize_selected_supplier_for_options(
-            st.session_state.get("supplier_profiles_active_supplier"),
-            supplier_options,
-        )
-    if st.session_state.get("supplier_internal_name") != normalized_transform_supplier:
-        st.session_state["supplier_internal_name"] = normalized_transform_supplier
-    if st.session_state.get("supplier_transform_internal_name") != normalized_transform_supplier:
-        st.session_state["supplier_transform_internal_name"] = normalized_transform_supplier
 
     st.subheader("Profilredigering")
     st.caption(
@@ -111,17 +106,10 @@ def _render_supplier_profile_editor(
     selected_supplier_name = (
         str(supplier_internal_name).strip() if supplier_internal_name is not None else ""
     )
-    if st.session_state.get("supplier_profiles_active_supplier") != (
-        selected_supplier_name if selected_supplier_name != "" else None
-    ):
-        st.session_state["supplier_profiles_active_supplier"] = (
-            selected_supplier_name if selected_supplier_name != "" else None
-        )
-    _sync_selected_supplier_between_views(
+    _set_selected_supplier(
         st.session_state,
         selected_supplier_name if selected_supplier_name != "" else None,
         supplier_options,
-        target_key="supplier_transform_internal_name",
     )
     supplier_transform_profiles_raw = st.session_state.get("supplier_transform_profiles", {})
     supplier_transform_profiles = (
@@ -141,7 +129,6 @@ def _render_supplier_profile_editor(
     if action_col_back.button("Tillbaka", type="secondary", key="supplier_profile_back_button"):
         st.session_state["supplier_profiles_mode"] = SUPPLIER_PROFILE_MODE_OVERVIEW
         st.session_state["supplier_profiles_delete_confirm"] = False
-        st.session_state["supplier_profiles_active_supplier"] = None
         _rerun()
     if action_col_delete.button(
         "Ta bort profil",
@@ -171,7 +158,6 @@ def _render_supplier_profile_editor(
                 st.error(delete_error)
             else:
                 st.session_state["supplier_profiles_mode"] = SUPPLIER_PROFILE_MODE_OVERVIEW
-                st.session_state["supplier_profiles_active_supplier"] = None
                 _clear_supplier_state(st.session_state)
                 _rerun()
         if cancel_col.button("Avbryt", key="supplier_profile_delete_cancel_button"):

@@ -127,3 +127,10 @@ def compute_hicore_stock(total_raw, reserved_raw) -> str:
     if reserved is None:
         reserved = Decimal(0)
     return _format_decimal(total - reserved)
+
+
+def compute_hicore_stock_with_fallback(total_raw, reserved_raw, stock_raw) -> str:
+    computed_stock = compute_hicore_stock(total_raw, reserved_raw)
+    if computed_stock != "":
+        return computed_stock
+    return normalise_stock(stock_raw)

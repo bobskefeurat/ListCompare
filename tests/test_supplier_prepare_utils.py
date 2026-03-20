@@ -213,6 +213,39 @@ class SupplierPrepareUtilsTests(unittest.TestCase):
         self.assertEqual(analysis.excluded_normalized_skus, frozenset({"500"}))
         self.assertEqual(prepared_df["Art.m\u00e4rkning"].tolist(), ["100"])
 
+    def test_existing_output_format_drops_blank_sku_rows(self) -> None:
+        df_supplier = pd.DataFrame(
+            [
+                {
+                    "Art.m\u00e4rkning": "",
+                    "Artikelnamn": "Blank Row",
+                    "Leverant\u00f6r": "EM Nordic",
+                },
+                {
+                    "Art.m\u00e4rkning": "00123",
+                    "Artikelnamn": "Receiver",
+                    "Leverant\u00f6r": "EM Nordic",
+                },
+            ]
+        )
+
+        analysis = build_supplier_prepare_analysis(
+            df_supplier,
+            supplier_name="EM Nordic",
+            profile_mapping={
+                "Art.m\u00e4rkning": "SupplierSku",
+            },
+        )
+
+        prepared_df = finalize_supplier_prepare_analysis(
+            analysis,
+            selected_candidates={},
+        )
+
+        self.assertEqual(len(analysis.conflicts), 0)
+        self.assertEqual(prepared_df["Art.m\u00e4rkning"].tolist(), ["00123"])
+        self.assertEqual(prepared_df["Artikelnamn"].tolist(), ["Receiver"])
+
 
 if __name__ == "__main__":
     unittest.main()

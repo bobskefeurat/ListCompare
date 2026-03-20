@@ -13,22 +13,11 @@ from ....core.suppliers.profile import (
 )
 from ..persistence import profile_store as _profile_store
 from ..runtime_paths import supplier_transform_profiles_path as _supplier_transform_profiles_path
+from ..session.shared_sync_status import store_shared_sync_status as _store_shared_sync_status
 from ..services.shared_sync import (
     PROFILES_FILE_NAME as _PROFILES_FILE_NAME,
     sync_shared_files as _sync_shared_files,
 )
-
-
-def _update_shared_sync_session_state(
-    session_state: dict[str, object],
-    *,
-    level: str,
-    message: str,
-    profile_conflicts: tuple[str, ...] = (),
-) -> None:
-    session_state["shared_sync_status_level"] = level
-    session_state["shared_sync_status_message"] = message
-    session_state["shared_sync_profile_conflicts"] = profile_conflicts
 
 
 def _load_profiles_from_disk() -> tuple[dict[str, dict[str, object]], Optional[str]]:
@@ -45,11 +34,12 @@ def persist_supplier_transform_profile(
     options: dict[str, bool],
 ) -> Optional[str]:
     pre_sync_status = _sync_shared_files(targets=(_PROFILES_FILE_NAME,))
-    _update_shared_sync_session_state(
+    _store_shared_sync_status(
         session_state,
         level=pre_sync_status.level,
         message=pre_sync_status.message,
         profile_conflicts=pre_sync_status.profile_conflicts,
+        source="Leverantörsprofiler: spara profil",
     )
     if pre_sync_status.level == "error":
         return pre_sync_status.message
@@ -115,11 +105,12 @@ def persist_supplier_transform_profile(
         post_sync_status = _sync_shared_files(targets=(_PROFILES_FILE_NAME,))
         session_state["supplier_transform_profiles"] = profiles
         session_state["supplier_transform_profiles_load_error"] = None
-        _update_shared_sync_session_state(
+        _store_shared_sync_status(
             session_state,
             level=post_sync_status.level,
             message=post_sync_status.message,
             profile_conflicts=post_sync_status.profile_conflicts,
+            source="Leverantörsprofiler: spara profil",
         )
         if post_sync_status.level == "error" or post_sync_status.profile_conflicts:
             return post_sync_status.message
@@ -132,11 +123,12 @@ def delete_supplier_transform_profile(
     supplier_name: str,
 ) -> Optional[str]:
     pre_sync_status = _sync_shared_files(targets=(_PROFILES_FILE_NAME,))
-    _update_shared_sync_session_state(
+    _store_shared_sync_status(
         session_state,
         level=pre_sync_status.level,
         message=pre_sync_status.message,
         profile_conflicts=pre_sync_status.profile_conflicts,
+        source="Leverantörsprofiler: ta bort profil",
     )
     if pre_sync_status.level == "error":
         return pre_sync_status.message
@@ -186,11 +178,12 @@ def delete_supplier_transform_profile(
         post_sync_status = _sync_shared_files(targets=(_PROFILES_FILE_NAME,))
         session_state["supplier_transform_profiles"] = profiles
         session_state["supplier_transform_profiles_load_error"] = None
-        _update_shared_sync_session_state(
+        _store_shared_sync_status(
             session_state,
             level=post_sync_status.level,
             message=post_sync_status.message,
             profile_conflicts=post_sync_status.profile_conflicts,
+            source="Leverantörsprofiler: ta bort profil",
         )
         if post_sync_status.level == "error" or post_sync_status.profile_conflicts:
             return post_sync_status.message

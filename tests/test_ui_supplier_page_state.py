@@ -29,9 +29,7 @@ class SupplierPageStateTests(unittest.TestCase):
 
         self.assertEqual(session_state["supplier_page_view"], SUPPLIER_PAGE_VIEW_TRANSFORM)
         self.assertEqual(session_state["supplier_profiles_mode"], SUPPLIER_PROFILE_MODE_EDITOR)
-        self.assertEqual(session_state["supplier_profiles_active_supplier"], "Acme")
         self.assertEqual(session_state["supplier_internal_name"], "Acme")
-        self.assertEqual(session_state["supplier_transform_internal_name"], "Acme")
         self.assertIsNone(session_state["supplier_page_view_request"])
         self.assertIsNone(session_state["supplier_profiles_mode_request"])
         self.assertIsNone(session_state["supplier_profiles_supplier_request"])
