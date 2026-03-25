@@ -18,7 +18,7 @@ from ....core.suppliers.supplier_products import (
 from ....core.suppliers.supplier_selection import normalized_skus_from_product_map
 from ..compute_shared import _find_case_insensitive_column, _hicore_purchase_column_name
 from ..io.brand_filter import _normalized_skus_for_excluded_brands
-from ..io.uploads import _uploaded_csv_to_df
+from ..io.uploads import _read_hicore_upload
 
 
 @dataclass(frozen=True)
@@ -37,8 +37,8 @@ class SupplierComputationArtifacts:
     warning_message: Optional[str]
 
 
-def load_hicore_compare_df(hicore_bytes: bytes) -> pd.DataFrame:
-    return _uploaded_csv_to_df(hicore_bytes, sep=";")
+def load_hicore_compare_df(hicore_file_name: str, hicore_bytes: bytes) -> pd.DataFrame:
+    return _read_hicore_upload(hicore_file_name, hicore_bytes)
 
 
 def _hicore_skus_by_normalized_sku(
@@ -118,6 +118,7 @@ def build_supplier_artifacts(
 
 
 def build_supplier_artifacts_from_uploads(
+    hicore_file_name: str,
     hicore_bytes: bytes,
     *,
     supplier_name: str,
@@ -125,7 +126,7 @@ def build_supplier_artifacts_from_uploads(
     excluded_brands: Optional[list[str]] = None,
     profile_excluded_normalized_skus: Optional[set[str]] = None,
 ) -> SupplierComputationArtifacts:
-    df_hicore = load_hicore_compare_df(hicore_bytes)
+    df_hicore = load_hicore_compare_df(hicore_file_name, hicore_bytes)
     return build_supplier_artifacts(
         df_hicore,
         supplier_name=supplier_name,

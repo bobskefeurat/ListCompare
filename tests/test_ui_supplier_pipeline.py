@@ -1,3 +1,4 @@
+import io
 import unittest
 
 import pandas as pd
@@ -13,11 +14,24 @@ def _to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(sep=";", index=False).encode("utf-8-sig")
 
 
+def _to_xlsx_bytes(df: pd.DataFrame) -> bytes:
+    buffer = io.BytesIO()
+    df.to_excel(buffer, index=False)
+    return buffer.getvalue()
+
+
 class SupplierPipelineTests(unittest.TestCase):
     def test_load_hicore_compare_df_reads_semicolon_upload(self) -> None:
         df_hicore = pd.DataFrame([{HICORE_COLUMNS["sku"]: "001"}])
 
-        loaded_df = load_hicore_compare_df(_to_csv_bytes(df_hicore))
+        loaded_df = load_hicore_compare_df("hicore.csv", _to_csv_bytes(df_hicore))
+
+        self.assertEqual(loaded_df[HICORE_COLUMNS["sku"]].tolist(), ["001"])
+
+    def test_load_hicore_compare_df_reads_excel_upload(self) -> None:
+        df_hicore = pd.DataFrame([{HICORE_COLUMNS["sku"]: "001"}])
+
+        loaded_df = load_hicore_compare_df("hicore.xlsx", _to_xlsx_bytes(df_hicore))
 
         self.assertEqual(loaded_df[HICORE_COLUMNS["sku"]].tolist(), ["001"])
 

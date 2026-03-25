@@ -117,8 +117,8 @@ def _render_compare_page(*, excluded_brands: list[str]) -> None:
         hicore_file = _render_file_input(
             session_state=st.session_state,
             kind="hicore",
-            label="HiCore produkt-export (.csv)",
-            file_types=["csv"],
+            label="HiCore produkt-export (.csv/.xlsx/.xls/.xlsm)",
+            file_types=["csv", "xlsx", "xls", "xlsm"],
             uploader_key="compare_hicore_uploader",
         )
         magento_file = _render_file_input(
@@ -152,6 +152,7 @@ def _render_compare_page(*, excluded_brands: list[str]) -> None:
             update_progress(0.0, "Startar")
             try:
                 result = _compute_compare_result(
+                    hicore_file_name=str(hicore_file["name"]),  # type: ignore[index]
                     hicore_bytes=hicore_file["bytes"],  # type: ignore[index]
                     magento_bytes=magento_file["bytes"],  # type: ignore[index]
                     excluded_brands=[str(name) for name in excluded_brands],
@@ -176,8 +177,8 @@ def _render_compare_page(*, excluded_brands: list[str]) -> None:
     hicore_file = _render_file_input(
         session_state=st.session_state,
         kind="compare_web_orders_hicore",
-        label="HiCore webborder-export (.csv)",
-        file_types=["csv"],
+        label="HiCore webborder-export (.csv/.xlsx/.xls/.xlsm)",
+        file_types=["csv", "xlsx", "xls", "xlsm"],
         uploader_key="compare_web_orders_hicore_uploader",
     )
     magento_file = _render_file_input(
@@ -199,6 +200,7 @@ def _render_compare_page(*, excluded_brands: list[str]) -> None:
         update_progress(0.0, "Startar")
         try:
             result = _compute_web_order_compare_result(
+                hicore_file_name=str(hicore_file["name"]),  # type: ignore[index]
                 hicore_bytes=hicore_file["bytes"],  # type: ignore[index]
                 magento_bytes=magento_file["bytes"],  # type: ignore[index]
                 progress_callback=update_progress,

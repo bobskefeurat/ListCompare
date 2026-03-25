@@ -107,6 +107,42 @@ class SupplierPageTests(unittest.TestCase):
         self.assertIsNone(supplier_index_error)
         self.assertIsNone(warning_message)
 
+    def test_skips_duplicate_sync_when_auto_sync_was_recently_run(self) -> None:
+        session_state: dict[str, object] = {
+            "supplier_page_view_last_rendered": SUPPLIER_PAGE_VIEW_COMPARE,
+        }
+        sync_mock = Mock()
+
+        with patch.object(supplier, "_sync_shared_files", sync_mock), patch.object(
+            supplier,
+            "_maybe_run_auto_shared_sync",
+            return_value=None,
+        ) as auto_sync_mock, patch.object(
+            supplier._profile_store,
+            "load_profiles",
+        ) as load_profiles_mock, patch.object(
+            supplier,
+            "_load_suppliers_from_index",
+        ) as load_suppliers_mock:
+            (
+                supplier_options,
+                supplier_index_error,
+                warning_message,
+            ) = supplier._sync_supplier_profiles_on_view_entry(
+                session_state,
+                selected_view=SUPPLIER_PAGE_VIEW_TRANSFORM,
+                supplier_options=["EM Nordic"],
+                supplier_index_error=None,
+            )
+
+        auto_sync_mock.assert_called_once()
+        sync_mock.assert_not_called()
+        load_profiles_mock.assert_not_called()
+        load_suppliers_mock.assert_not_called()
+        self.assertEqual(supplier_options, ["EM Nordic"])
+        self.assertIsNone(supplier_index_error)
+        self.assertIsNone(warning_message)
+
 
 if __name__ == "__main__":
     unittest.main()

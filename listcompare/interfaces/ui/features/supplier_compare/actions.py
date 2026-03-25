@@ -249,6 +249,7 @@ def handle_run_supplier_compare(
     update_progress(0.0, "Startar")
     try:
         result = _compute_supplier_result(
+            hicore_file_name=str(hicore_file["name"]),  # type: ignore[index]
             hicore_bytes=hicore_file["bytes"],  # type: ignore[index]
             supplier_name=selected_supplier_name,
             supplier_df=prepared_supplier_df,

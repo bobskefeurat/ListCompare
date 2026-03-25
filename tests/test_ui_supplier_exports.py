@@ -2,7 +2,7 @@ import io
 import unittest
 
 import pandas as pd
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from listcompare.core.products.product_schema import HICORE_COLUMNS
 from listcompare.core.suppliers.prepare import (
@@ -29,6 +29,24 @@ def _read_excel_bytes(data: bytes) -> pd.DataFrame:
 
 def _load_excel_workbook(data: bytes):
     return load_workbook(io.BytesIO(data), data_only=False)
+
+
+def _to_xlsx_bytes_from_rows(
+    rows: list[list[object]],
+    *,
+    number_formats: dict[str, str] | None = None,
+) -> bytes:
+    workbook = Workbook()
+    worksheet = workbook.active
+    for row in rows:
+        worksheet.append(row)
+
+    for cell_ref, number_format in (number_formats or {}).items():
+        worksheet[cell_ref].number_format = number_format
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 def _purchase_column_name() -> str:
@@ -123,6 +141,7 @@ class SupplierUiExportTests(unittest.TestCase):
             ]
         )
         result = compute_supplier_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=hicore_bytes,
             supplier_name="EM Nordic",
             supplier_df=df_supplier,
@@ -234,6 +253,7 @@ class SupplierUiExportTests(unittest.TestCase):
         )
 
         result = compute_supplier_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=hicore_bytes,
             supplier_name="EM Nordic",
             supplier_df=prepared_supplier_df,
@@ -287,6 +307,7 @@ class SupplierUiExportTests(unittest.TestCase):
         )
 
         result = compute_supplier_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=hicore_bytes,
             supplier_name="EM Nordic",
             supplier_df=df_supplier,
@@ -344,6 +365,7 @@ class SupplierUiExportTests(unittest.TestCase):
         )
 
         result = compute_supplier_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=hicore_bytes,
             supplier_name="EM Nordic",
             supplier_df=df_supplier,
@@ -382,6 +404,7 @@ class SupplierUiExportTests(unittest.TestCase):
             ]
         )
         review_result = compute_supplier_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=review_hicore_bytes,
             supplier_name="EM Nordic",
             supplier_df=review_supplier,
@@ -437,6 +460,7 @@ class SupplierUiExportTests(unittest.TestCase):
         )
 
         result = compute_supplier_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=hicore_bytes,
             supplier_name="EM Nordic",
             supplier_df=df_supplier,
@@ -525,6 +549,7 @@ class SupplierUiExportTests(unittest.TestCase):
         )
 
         result = compute_supplier_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=hicore_bytes,
             supplier_name="EM Nordic",
             supplier_df=prepared_supplier_df,
@@ -533,6 +558,48 @@ class SupplierUiExportTests(unittest.TestCase):
 
         self.assertEqual(result.outgoing_count, 0)
         self.assertTrue(result.outgoing_df.empty)
+
+    def test_supplier_compare_reads_hicore_excel_upload(self) -> None:
+        sku_col = HICORE_COLUMNS["sku"]
+        name_col = HICORE_COLUMNS["name"]
+        supplier_col = HICORE_COLUMNS["supplier"]
+        total_col = HICORE_COLUMNS["total_stock"]
+        reserved_col = HICORE_COLUMNS["reserved"]
+        price_col = HICORE_COLUMNS["price"]
+        purchase_col = _purchase_column_name()
+        hicore_upload = _to_xlsx_bytes_from_rows(
+            [
+                [sku_col, name_col, total_col, reserved_col, price_col, supplier_col],
+                [100, "SKU 100", 0, 0, 10, "EM Nordic"],
+            ],
+            number_formats={"A2": "00000"},
+        )
+
+        supplier_columns = [*SUPPLIER_HICORE_RENAME_COLUMNS, SUPPLIER_HICORE_SUPPLIER_COLUMN]
+        base_row = {column: "" for column in supplier_columns}
+        df_supplier = pd.DataFrame(
+            [
+                {
+                    **base_row,
+                    sku_col: "100",
+                    name_col: "SKU 100 supplier",
+                    HICORE_COLUMNS["brand"]: "Brand 100",
+                    purchase_col: "5",
+                    price_col: "11",
+                    SUPPLIER_HICORE_SUPPLIER_COLUMN: "EM Nordic",
+                },
+            ]
+        )
+
+        result = compute_supplier_result(
+            hicore_file_name="hicore.xlsx",
+            hicore_bytes=hicore_upload,
+            supplier_name="EM Nordic",
+            supplier_df=df_supplier,
+        )
+
+        out_of_stock_export = _read_excel_bytes(result.price_updates_out_of_stock_excel_bytes)
+        self.assertEqual(out_of_stock_export[sku_col].tolist(), ["00100"])
 
 
 if __name__ == "__main__":

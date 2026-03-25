@@ -19,6 +19,7 @@ from .compare_pipeline import (
 
 
 def compute_compare_result(
+    hicore_file_name: str,
     hicore_bytes: bytes,
     magento_bytes: bytes,
     *,
@@ -28,7 +29,7 @@ def compute_compare_result(
     """Compute the main HiCore-Magento compare previews and CSV exports."""
 
     _notify_progress(progress_callback, 0.05, "Läser HiCore-fil")
-    df_hicore = load_hicore_compare_df(hicore_bytes)
+    df_hicore = load_hicore_compare_df(hicore_file_name, hicore_bytes)
     _notify_progress(progress_callback, 0.20, "Läser Magento-fil")
     df_magento = load_magento_compare_df(magento_bytes)
     _notify_progress(progress_callback, 0.40, "Bygger compare-underlag")
@@ -62,6 +63,7 @@ def compute_compare_result(
 
 
 def compute_web_order_compare_result(
+    hicore_file_name: str,
     hicore_bytes: bytes,
     magento_bytes: bytes,
     *,
@@ -70,7 +72,7 @@ def compute_web_order_compare_result(
     """Compute the Magento-only web-order export and preview table."""
 
     _notify_progress(progress_callback, 0.10, "Läser HiCore-fil")
-    df_hicore = load_hicore_compare_df(hicore_bytes)
+    df_hicore = load_hicore_compare_df(hicore_file_name, hicore_bytes)
     _notify_progress(progress_callback, 0.35, "Läser Magento-fil")
     df_magento = load_magento_compare_df(magento_bytes)
     _notify_progress(progress_callback, 0.75, "Jämför webborder")

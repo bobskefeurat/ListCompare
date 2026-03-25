@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook
 
+from ....core.products.product_schema import HICORE_COLUMNS
 from ..common import CSV_ENCODINGS
 
 
@@ -79,6 +80,43 @@ def _read_compare_magento_csv_upload(data: bytes) -> pd.DataFrame:
     return _read_supplier_csv_upload(data)
 
 
+def _read_hicore_csv_upload(data: bytes) -> pd.DataFrame:
+    return _uploaded_csv_to_df(data, sep=";")
+
+
+def _find_case_insensitive_column(columns: list[object], wanted: str) -> Optional[str]:
+    wanted_folded = str(wanted).strip().casefold()
+    for column in columns:
+        if str(column).strip().casefold() == wanted_folded:
+            return str(column)
+    return None
+
+
+def _normalize_integer_like_identifier_text(value: object) -> object:
+    if pd.isna(value):
+        return value
+    text = str(value).strip()
+    if re.fullmatch(r"-?\d+\.0+", text) is None:
+        return value
+    return text.split(".", 1)[0]
+
+
+def _normalize_hicore_identifier_columns(df: pd.DataFrame) -> pd.DataFrame:
+    normalized_df = df.copy()
+    for wanted_column in (
+        HICORE_COLUMNS["sku"],
+        HICORE_COLUMNS["article_number"],
+        "Webbordernr",
+    ):
+        actual_column = _find_case_insensitive_column(normalized_df.columns.tolist(), wanted_column)
+        if actual_column is None:
+            continue
+        normalized_df[actual_column] = normalized_df[actual_column].map(
+            _normalize_integer_like_identifier_text
+        )
+    return normalized_df
+
+
 def _zero_pad_width_from_excel_number_format(number_format: object) -> Optional[int]:
     text = str(number_format or "").strip()
     if text == "":
@@ -112,11 +150,46 @@ def _formatted_zero_padded_excel_text(raw_value: object, number_format: object) 
     return f"{sign}{digits}"
 
 
-def _read_excel_upload(data: bytes) -> pd.DataFrame:
-    df = pd.read_excel(io.BytesIO(data), dtype=str)
+def _matching_column_count(columns: list[object], wanted_columns: list[str]) -> int:
+    actual = {str(column).strip().casefold() for column in columns}
+    return sum(1 for column in wanted_columns if column.casefold() in actual)
+
+
+def _best_hicore_sheet_name(data: bytes) -> Optional[str]:
+    wanted_columns = [
+        str(column).strip()
+        for column in HICORE_COLUMNS.values()
+        if isinstance(column, str) and str(column).strip() != ""
+    ]
+    workbook = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+    try:
+        best_sheet_name: Optional[str] = None
+        best_score = -1
+        sku_column_name = HICORE_COLUMNS["sku"]
+        for sheet_name in workbook.sheetnames:
+            worksheet = workbook[sheet_name]
+            header_cells = next(
+                worksheet.iter_rows(min_row=1, max_row=1, values_only=True),
+                (),
+            )
+            header_values = [str(value).strip() for value in header_cells if value is not None]
+            if _find_case_insensitive_column(header_values, sku_column_name) is None:
+                continue
+            score = _matching_column_count(header_values, wanted_columns)
+            if score > best_score:
+                best_score = score
+                best_sheet_name = sheet_name
+        return best_sheet_name
+    finally:
+        workbook.close()
+
+
+def _read_excel_upload(data: bytes, *, sheet_name: Optional[str] = None) -> pd.DataFrame:
+    df = pd.read_excel(io.BytesIO(data), dtype=str, sheet_name=sheet_name or 0)
     workbook = load_workbook(io.BytesIO(data), data_only=True)
     try:
-        worksheet = workbook[workbook.sheetnames[0]]
+        worksheet_name = sheet_name or workbook.sheetnames[0]
+        worksheet = workbook[worksheet_name]
         repaired_df = df.copy()
         for row_index in range(len(repaired_df.index)):
             for column_index in range(len(repaired_df.columns)):
@@ -137,6 +210,25 @@ def _read_supplier_upload(file_name: str, data: bytes) -> pd.DataFrame:
     return _read_supplier_upload_cached(file_name=file_name, data=data).copy()
 
 
+def _read_hicore_upload(file_name: str, data: bytes) -> pd.DataFrame:
+    return _read_hicore_upload_cached(file_name=file_name, data=data).copy()
+
+
+def _read_hicore_name_columns(
+    file_name: str,
+    data: bytes,
+) -> tuple[list[str], list[str], bool, bool]:
+    supplier_names, brand_names, has_supplier_column, has_brand_column = (
+        _read_hicore_name_columns_cached(file_name=file_name, data=data)
+    )
+    return (
+        list(supplier_names),
+        list(brand_names),
+        has_supplier_column,
+        has_brand_column,
+    )
+
+
 @st.cache_data(show_spinner=False)
 def _read_supplier_upload_cached(file_name: str, data: bytes) -> pd.DataFrame:
     suffix = Path(file_name).suffix.lower()
@@ -145,3 +237,114 @@ def _read_supplier_upload_cached(file_name: str, data: bytes) -> pd.DataFrame:
     if suffix in (".xlsx", ".xls", ".xlsm"):
         return _read_excel_upload(data)
     raise ValueError(f"Unsupported supplier file type: {file_name}")
+
+
+@st.cache_data(show_spinner=False)
+def _read_hicore_upload_cached(file_name: str, data: bytes) -> pd.DataFrame:
+    suffix = Path(file_name).suffix.lower()
+    if suffix == ".csv":
+        return _normalize_hicore_identifier_columns(_read_hicore_csv_upload(data))
+    if suffix in (".xlsx", ".xls", ".xlsm"):
+        sheet_name = _best_hicore_sheet_name(data)
+        if sheet_name is None:
+            raise ValueError(
+                f'Kunde inte hitta ett Excel-blad med kolumnen "{HICORE_COLUMNS["sku"]}" i HiCore-filen.'
+            )
+        return _normalize_hicore_identifier_columns(
+            _read_excel_upload(data, sheet_name=sheet_name)
+        )
+    raise ValueError(f"Unsupported HiCore file type: {file_name}")
+
+
+def _raw_text_or_empty(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def _extract_hicore_name_columns_from_excel(
+    data: bytes,
+    *,
+    sheet_name: str,
+) -> tuple[list[str], list[str], bool, bool]:
+    workbook = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+    try:
+        worksheet = workbook[sheet_name]
+        header_cells = next(
+            worksheet.iter_rows(min_row=1, max_row=1, values_only=True),
+            (),
+        )
+        header_values = [_raw_text_or_empty(value) for value in header_cells]
+        supplier_column_name = HICORE_COLUMNS["supplier"]
+        brand_column_name = HICORE_COLUMNS.get("brand")
+        supplier_index: Optional[int] = None
+        brand_index: Optional[int] = None
+        for index, header_value in enumerate(header_values):
+            if supplier_index is None and (
+                _find_case_insensitive_column([header_value], supplier_column_name) is not None
+            ):
+                supplier_index = index
+            if (
+                brand_index is None
+                and brand_column_name is not None
+                and _find_case_insensitive_column([header_value], brand_column_name) is not None
+            ):
+                brand_index = index
+
+        supplier_names: list[str] = []
+        brand_names: list[str] = []
+        for row in worksheet.iter_rows(min_row=2, values_only=True):
+            row_values = list(row)
+            if supplier_index is not None and supplier_index < len(row_values):
+                supplier_value = _raw_text_or_empty(row_values[supplier_index])
+                if supplier_value != "":
+                    supplier_names.append(supplier_value)
+            if brand_index is not None and brand_index < len(row_values):
+                brand_value = _raw_text_or_empty(row_values[brand_index])
+                if brand_value != "":
+                    brand_names.append(brand_value)
+
+        return (
+            supplier_names,
+            brand_names,
+            supplier_index is not None,
+            brand_index is not None,
+        )
+    finally:
+        workbook.close()
+
+
+@st.cache_data(show_spinner=False)
+def _read_hicore_name_columns_cached(
+    file_name: str,
+    data: bytes,
+) -> tuple[list[str], list[str], bool, bool]:
+    suffix = Path(file_name).suffix.lower()
+    if suffix == ".csv":
+        df_hicore = _read_hicore_csv_upload(data)
+        supplier_col = HICORE_COLUMNS["supplier"]
+        brand_col = HICORE_COLUMNS.get("brand")
+        supplier_names = (
+            [_raw_text_or_empty(value) for value in df_hicore[supplier_col].tolist()]
+            if supplier_col in df_hicore.columns
+            else []
+        )
+        brand_names = (
+            [_raw_text_or_empty(value) for value in df_hicore[brand_col].tolist()]
+            if brand_col and brand_col in df_hicore.columns
+            else []
+        )
+        return (
+            [value for value in supplier_names if value != ""],
+            [value for value in brand_names if value != ""],
+            supplier_col in df_hicore.columns,
+            bool(brand_col and brand_col in df_hicore.columns),
+        )
+    if suffix in (".xlsx", ".xls", ".xlsm"):
+        sheet_name = _best_hicore_sheet_name(data)
+        if sheet_name is None:
+            raise ValueError(
+                f'Kunde inte hitta ett Excel-blad med kolumnen "{HICORE_COLUMNS["sku"]}" i HiCore-filen.'
+            )
+        return _extract_hicore_name_columns_from_excel(data, sheet_name=sheet_name)
+    raise ValueError(f"Unsupported HiCore file type: {file_name}")

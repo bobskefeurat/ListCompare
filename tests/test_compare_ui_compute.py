@@ -2,6 +2,7 @@ import io
 import unittest
 
 import pandas as pd
+from openpyxl import Workbook
 
 from listcompare.core.products.product_schema import HICORE_COLUMNS
 from listcompare.interfaces.ui.services.compare_compute import (
@@ -16,6 +17,24 @@ def _to_csv_bytes(df: pd.DataFrame, *, sep: str) -> bytes:
 
 def _read_csv_bytes(data: bytes) -> pd.DataFrame:
     return pd.read_csv(io.BytesIO(data), sep=";", dtype=str).fillna("")
+
+
+def _to_xlsx_bytes_from_rows(
+    rows: list[list[object]],
+    *,
+    number_formats: dict[str, str] | None = None,
+) -> bytes:
+    workbook = Workbook()
+    worksheet = workbook.active
+    for row in rows:
+        worksheet.append(row)
+
+    for cell_ref, number_format in (number_formats or {}).items():
+        worksheet[cell_ref].number_format = number_format
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 class CompareUiComputeTests(unittest.TestCase):
@@ -66,6 +85,7 @@ class CompareUiComputeTests(unittest.TestCase):
         )
 
         result = compute_web_order_compare_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
             magento_bytes=_to_csv_bytes(df_magento, sep=","),
         )
@@ -112,6 +132,7 @@ class CompareUiComputeTests(unittest.TestCase):
         )
 
         result = compute_compare_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
             magento_bytes=_to_csv_bytes(df_magento, sep=";"),
         )
@@ -176,6 +197,7 @@ class CompareUiComputeTests(unittest.TestCase):
         )
 
         result = compute_compare_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
             magento_bytes=_to_csv_bytes(df_magento, sep=","),
         )
@@ -208,6 +230,7 @@ class CompareUiComputeTests(unittest.TestCase):
         df_magento = pd.DataFrame(columns=["sku", "name", "qty"])
 
         result = compute_compare_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
             magento_bytes=_to_csv_bytes(df_magento, sep=","),
         )
@@ -227,6 +250,7 @@ class CompareUiComputeTests(unittest.TestCase):
         df_magento = pd.DataFrame([{"Other": "20"}])
 
         result = compute_web_order_compare_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
             magento_bytes=_to_csv_bytes(df_magento, sep=","),
         )
@@ -265,6 +289,7 @@ class CompareUiComputeTests(unittest.TestCase):
         )
 
         result = compute_compare_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
             magento_bytes=_to_csv_bytes(df_magento, sep=","),
         )
@@ -300,6 +325,7 @@ class CompareUiComputeTests(unittest.TestCase):
         )
 
         result = compute_compare_result(
+            hicore_file_name="hicore.csv",
             hicore_bytes=_to_csv_bytes(df_hicore, sep=";"),
             magento_bytes=_to_csv_bytes(df_magento, sep=","),
         )
@@ -307,6 +333,83 @@ class CompareUiComputeTests(unittest.TestCase):
         export_df = _read_csv_bytes(result.stock_mismatch_csv_bytes)
         self.assertEqual(export_df.columns.tolist(), [sku_col])
         self.assertEqual(export_df[sku_col].tolist(), ["00123"])
+
+    def test_compare_result_reads_hicore_excel_upload_and_preserves_hicore_sku_format(self) -> None:
+        sku_col = HICORE_COLUMNS["sku"]
+        name_col = HICORE_COLUMNS["name"]
+        total_col = HICORE_COLUMNS["total_stock"]
+        reserved_col = HICORE_COLUMNS["reserved"]
+        hicore_upload = _to_xlsx_bytes_from_rows(
+            [
+                [sku_col, name_col, total_col, reserved_col],
+                [123, "Product A", 5, 0],
+            ],
+            number_formats={"A2": "00000"},
+        )
+        df_magento = pd.DataFrame(
+            [
+                {
+                    "sku": "123",
+                    "name": "Product A",
+                    "qty": "3",
+                }
+            ]
+        )
+
+        result = compute_compare_result(
+            hicore_file_name="hicore.xlsx",
+            hicore_bytes=hicore_upload,
+            magento_bytes=_to_csv_bytes(df_magento, sep=","),
+        )
+
+        export_df = _read_csv_bytes(result.stock_mismatch_csv_bytes)
+        self.assertEqual(export_df.columns.tolist(), [sku_col])
+        self.assertEqual(export_df[sku_col].tolist(), ["00123"])
+
+    def test_compare_web_order_result_reads_hicore_excel_upload(self) -> None:
+        sku_col = HICORE_COLUMNS["sku"]
+        name_col = HICORE_COLUMNS["name"]
+        total_col = HICORE_COLUMNS["total_stock"]
+        reserved_col = HICORE_COLUMNS["reserved"]
+        supplier_col = HICORE_COLUMNS["supplier"]
+        hicore_upload = _to_xlsx_bytes_from_rows(
+            [
+                [sku_col, name_col, total_col, reserved_col, supplier_col, "Webbordernr"],
+                ["001", "Product A", 4, 1, "EM Nordic", 24539],
+                ["002", "Product B", 5, 0, "EM Nordic", 24541],
+            ],
+            number_formats={
+                "F2": "000000000",
+                "F3": "000000000",
+            },
+        )
+        df_magento = pd.DataFrame(
+            [
+                {
+                    "sku": "1",
+                    "name": "Product A",
+                    "qty": "3",
+                    "ID": "000024539",
+                    "Status": "processing",
+                },
+                {
+                    "sku": "003",
+                    "name": "Product C",
+                    "qty": "2",
+                    "ID": "000024540",
+                    "Status": "pending",
+                },
+            ]
+        )
+
+        result = compute_web_order_compare_result(
+            hicore_file_name="hicore.xlsx",
+            hicore_bytes=hicore_upload,
+            magento_bytes=_to_csv_bytes(df_magento, sep=","),
+        )
+
+        self.assertEqual(result.magento_only_web_orders_count, 1)
+        self.assertEqual(result.magento_only_web_orders_df["ID"].tolist(), ["000024540"])
 
 
 if __name__ == "__main__":

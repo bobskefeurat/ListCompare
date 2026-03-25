@@ -134,7 +134,13 @@ def _render_supplier_results(result: SupplierUiResult, *, supplier_name: str) ->
             key="download_supplier_article_review_excel",
         )
         st.dataframe(
-            _style_stock_mismatch_df(_with_one_based_index(article_number_review_display_df)),
+            _style_stock_mismatch_df(
+                _with_one_based_index(article_number_review_display_df),
+                group_values=result.article_number_review_df.get(
+                    "normalized_article_number",
+                    pd.Series(dtype=str),
+                ).tolist(),
+            ),
             use_container_width=True,
         )
 

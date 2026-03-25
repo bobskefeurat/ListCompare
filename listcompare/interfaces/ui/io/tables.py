@@ -129,29 +129,44 @@ def _article_number_review_matches_to_df(
     return df.reset_index(drop=True)
 
 
-def _style_stock_mismatch_df(df: pd.DataFrame):
+def _style_stock_mismatch_df(
+    df: pd.DataFrame,
+    *,
+    group_values: Optional[list[object]] = None,
+):
     if df.empty:
         return df.style
 
     colors = ("#f3f3f3", "#ffffff")
     row_colors: list[str] = []
-    group_column: Optional[str] = None
-    for candidate in (
-        "normalized_sku",
-        "normalized_article_number",
-        "article_number",
-        "sku",
-        HICORE_COLUMNS["sku"],
-    ):
-        if candidate in df.columns:
-            group_column = candidate
-            break
+    normalized_group_values: Optional[list[str]] = None
+    if group_values is not None and len(group_values) == len(df):
+        normalized_group_values = [
+            normalize_sku("" if pd.isna(value) else str(value))
+            for value in group_values
+        ]
+    else:
+        group_column: Optional[str] = None
+        for candidate in (
+            "normalized_sku",
+            "normalized_article_number",
+            "article_number",
+            "sku",
+            HICORE_COLUMNS["sku"],
+        ):
+            if candidate in df.columns:
+                group_column = candidate
+                break
+        if group_column is not None:
+            normalized_group_values = [
+                normalize_sku("" if pd.isna(value) else str(value))
+                for value in df[group_column].tolist()
+            ]
 
-    if group_column is not None:
+    if normalized_group_values is not None:
         previous_key: Optional[str] = None
         group_index = -1
-        for value in df[group_column].tolist():
-            current_key = normalize_sku("" if pd.isna(value) else str(value))
+        for current_key in normalized_group_values:
             if previous_key is None or current_key != previous_key:
                 group_index += 1
                 previous_key = current_key

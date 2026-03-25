@@ -1,3 +1,4 @@
+import io
 import unittest
 
 import pandas as pd
@@ -13,13 +14,33 @@ def _to_csv_bytes(df: pd.DataFrame, *, sep: str) -> bytes:
     return df.to_csv(sep=sep, index=False).encode("utf-8-sig")
 
 
+def _to_xlsx_bytes(df: pd.DataFrame) -> bytes:
+    buffer = io.BytesIO()
+    df.to_excel(buffer, index=False)
+    return buffer.getvalue()
+
+
 class ComparePipelineTests(unittest.TestCase):
     def test_load_compare_input_data_reads_both_upload_formats(self) -> None:
         df_hicore = pd.DataFrame([{HICORE_COLUMNS["sku"]: "001"}])
         df_magento = pd.DataFrame([{"sku": "1", "qty": "2"}])
 
         loaded_hicore_df, loaded_magento_df = load_compare_input_data(
+            "hicore.csv",
             _to_csv_bytes(df_hicore, sep=";"),
+            _to_csv_bytes(df_magento, sep=","),
+        )
+
+        self.assertEqual(loaded_hicore_df[HICORE_COLUMNS["sku"]].tolist(), ["001"])
+        self.assertEqual(loaded_magento_df["sku"].tolist(), ["1"])
+
+    def test_load_compare_input_data_reads_hicore_excel_upload(self) -> None:
+        df_hicore = pd.DataFrame([{HICORE_COLUMNS["sku"]: "001"}])
+        df_magento = pd.DataFrame([{"sku": "1", "qty": "2"}])
+
+        loaded_hicore_df, loaded_magento_df = load_compare_input_data(
+            "hicore.xlsx",
+            _to_xlsx_bytes(df_hicore),
             _to_csv_bytes(df_magento, sep=","),
         )
 

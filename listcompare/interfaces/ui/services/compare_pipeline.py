@@ -27,7 +27,7 @@ from ....core.products.product_normalization import (
 )
 from ....core.products.product_schema import HICORE_COLUMNS
 from ..io.brand_filter import _normalized_skus_for_excluded_brands
-from ..io.uploads import _read_compare_magento_csv_upload, _uploaded_csv_to_df
+from ..io.uploads import _read_compare_magento_csv_upload, _read_hicore_upload
 
 
 @dataclass(frozen=True)
@@ -40,16 +40,22 @@ class CompareComputationArtifacts:
     warning_message: Optional[str]
 
 
-def load_hicore_compare_df(hicore_bytes: bytes) -> pd.DataFrame:
-    return _uploaded_csv_to_df(hicore_bytes, sep=";")
+def load_hicore_compare_df(hicore_file_name: str, hicore_bytes: bytes) -> pd.DataFrame:
+    return _read_hicore_upload(hicore_file_name, hicore_bytes)
 
 
 def load_magento_compare_df(magento_bytes: bytes) -> pd.DataFrame:
     return _read_compare_magento_csv_upload(magento_bytes)
 
 
-def load_compare_input_data(hicore_bytes: bytes, magento_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame]:
-    return load_hicore_compare_df(hicore_bytes), load_magento_compare_df(magento_bytes)
+def load_compare_input_data(
+    hicore_file_name: str,
+    hicore_bytes: bytes,
+    magento_bytes: bytes,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    return load_hicore_compare_df(hicore_file_name, hicore_bytes), load_magento_compare_df(
+        magento_bytes
+    )
 
 
 def _is_truthy_web_flag(value: object) -> bool:
@@ -204,12 +210,17 @@ def build_compare_artifacts(
 
 
 def build_compare_artifacts_from_uploads(
+    hicore_file_name: str,
     hicore_bytes: bytes,
     magento_bytes: bytes,
     *,
     excluded_brands: Optional[list[str]] = None,
 ) -> CompareComputationArtifacts:
-    df_hicore, df_magento = load_compare_input_data(hicore_bytes, magento_bytes)
+    df_hicore, df_magento = load_compare_input_data(
+        hicore_file_name,
+        hicore_bytes,
+        magento_bytes,
+    )
     return build_compare_artifacts(
         df_hicore,
         df_magento,

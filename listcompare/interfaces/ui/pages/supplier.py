@@ -26,6 +26,7 @@ from ..session.supplier_page_state import (
     apply_requested_supplier_page_state as _apply_requested_supplier_page_state,
 )
 from ..session.shared_sync_status import store_shared_sync_status as _store_shared_sync_status
+from ..session.shared_sync_status import maybe_run_auto_shared_sync as _maybe_run_auto_shared_sync
 from ..session.supplier_selection import (
     sync_supplier_selection_session_state as _sync_supplier_selection_session_state,
 )
@@ -45,9 +46,13 @@ def _sync_supplier_profiles_on_view_entry(
     ):
         return supplier_options, supplier_index_error, None
 
-    sync_status = _sync_shared_files(
-        targets=(_SUPPLIER_INDEX_FILE_NAME, _PROFILES_FILE_NAME)
+    sync_status = _maybe_run_auto_shared_sync(
+        session_state,
+        sync_runner=_sync_shared_files,
+        targets=(_SUPPLIER_INDEX_FILE_NAME, _PROFILES_FILE_NAME),
     )
+    if sync_status is None:
+        return supplier_options, supplier_index_error, None
     _store_shared_sync_status(
         session_state,
         level=sync_status.level,

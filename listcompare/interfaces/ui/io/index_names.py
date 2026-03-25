@@ -3,40 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-import pandas as pd
 import streamlit as st
 
-from ....core.products.product_schema import HICORE_COLUMNS
 from ..persistence import index_store as _index_store
-from .uploads import _uploaded_csv_to_df
+from .uploads import _read_hicore_name_columns
 
 
 def _normalize_supplier_names(raw_names: list[str]) -> list[str]:
     return _index_store.normalize_names(raw_names)
-
-
-def _supplier_names_from_hicore_df(df_hicore: pd.DataFrame) -> list[str]:
-    supplier_col = HICORE_COLUMNS["supplier"]
-    if supplier_col not in df_hicore.columns:
-        return []
-    raw_names: list[str] = [
-        str(value)
-        for value in df_hicore[supplier_col].tolist()
-        if not pd.isna(value)
-    ]
-    return _normalize_supplier_names(raw_names)
-
-
-def _brand_names_from_hicore_df(df_hicore: pd.DataFrame) -> list[str]:
-    brand_col = HICORE_COLUMNS.get("brand")
-    if brand_col is None or brand_col not in df_hicore.columns:
-        return []
-    raw_names: list[str] = [
-        str(value)
-        for value in df_hicore[brand_col].tolist()
-        if not pd.isna(value)
-    ]
-    return _normalize_supplier_names(raw_names)
 
 
 def _load_suppliers_from_index(path: Path) -> tuple[list[str], Optional[str]]:
@@ -80,14 +54,12 @@ def _load_names_from_uploaded_hicore(
     uploaded_name: str,
     uploaded_bytes: bytes,
 ) -> tuple[list[str], list[str], bool, bool]:
-    del uploaded_name
-    df_hicore = _uploaded_csv_to_df(uploaded_bytes, sep=";")
-    supplier_col = HICORE_COLUMNS["supplier"]
-    brand_col = HICORE_COLUMNS.get("brand")
-    return (
-        _supplier_names_from_hicore_df(df_hicore),
-        _brand_names_from_hicore_df(df_hicore),
-        supplier_col in df_hicore.columns,
-        bool(brand_col and brand_col in df_hicore.columns),
+    supplier_names, brand_names, has_supplier_column, has_brand_column = (
+        _read_hicore_name_columns(uploaded_name, uploaded_bytes)
     )
-
+    return (
+        _normalize_supplier_names(supplier_names),
+        _normalize_supplier_names(brand_names),
+        has_supplier_column,
+        has_brand_column,
+    )

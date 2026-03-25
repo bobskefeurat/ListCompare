@@ -60,6 +60,7 @@ def init_session_state(session_state: dict[str, object]) -> None:
         "shared_sync_status_message": None,
         "shared_sync_profile_conflicts": (),
         "shared_sync_status_source": None,
+        "_auto_shared_sync_cache": {},
         "supplier_transform_profiles": dict(supplier_transform_profiles),
         "supplier_transform_profiles_load_error": supplier_transform_profiles_error,
         "supplier_transform_profiles_save_error": None,

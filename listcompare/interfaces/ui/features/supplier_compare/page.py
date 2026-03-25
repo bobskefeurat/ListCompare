@@ -61,8 +61,8 @@ def _render_supplier_compare_tab(
     hicore_file = _render_file_input(
         session_state=st.session_state,
         kind="hicore",
-        label="HiCore-export (.csv)",
-        file_types=["csv"],
+        label="HiCore-export (.csv/.xlsx/.xls/.xlsm)",
+        file_types=["csv", "xlsx", "xls", "xlsm"],
         uploader_key="supplier_hicore_uploader",
     )
     supplier_file = _render_file_input(

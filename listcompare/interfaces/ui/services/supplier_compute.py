@@ -104,6 +104,7 @@ def _build_article_number_review_export_df(article_number_review_df: pd.DataFram
 
 
 def compute_supplier_result(
+    hicore_file_name: str,
     hicore_bytes: bytes,
     *,
     supplier_name: str,
@@ -115,7 +116,7 @@ def compute_supplier_result(
     """Compute supplier compare previews and export payloads for the UI."""
 
     _notify_progress(progress_callback, 0.05, "Läser HiCore-fil")
-    df_hicore = load_hicore_compare_df(hicore_bytes)
+    df_hicore = load_hicore_compare_df(hicore_file_name, hicore_bytes)
     _notify_progress(progress_callback, 0.40, "Bygger compare-underlag")
     _notify_progress(progress_callback, 0.62, "Jämför mot HiCore")
     artifacts = build_supplier_artifacts(
